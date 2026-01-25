@@ -69,9 +69,12 @@ class SGD(Optimizer):
         momentum: Momentum factor (0 = no momentum)
         nesterov: Whether to use Nesterov momentum
         weight_decay: L2 regularization factor
+        l1_regularization: L1 regularization factor (for sparse weights)
 
     Example:
         optimizer = SGD(learning_rate=0.01, momentum=0.9)
+        # With L1 regularization for sparse weights:
+        optimizer = SGD(learning_rate=0.01, l1_regularization=0.001)
     """
 
     def __init__(
@@ -80,19 +83,25 @@ class SGD(Optimizer):
         momentum: float = 0.0,
         nesterov: bool = False,
         weight_decay: float = 0.0,
+        l1_regularization: float = 0.0,
     ):
         self._learning_rate = learning_rate
         self.momentum = momentum
         self.nesterov = nesterov
         self.weight_decay = weight_decay
+        self.l1_regularization = l1_regularization
         self._velocity: Dict[int, np.ndarray] = {}
 
     def update(
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
     ) -> np.ndarray:
-        # Apply weight decay
+        # Apply L2 weight decay
         if self.weight_decay > 0:
             gradient = gradient + self.weight_decay * weights
+
+        # Apply L1 regularization (subgradient)
+        if self.l1_regularization > 0:
+            gradient = gradient + self.l1_regularization * np.sign(weights)
 
         if self.momentum > 0:
             if param_id not in self._velocity:
@@ -283,3 +292,161 @@ class AdaGrad(Optimizer):
 
     def reset(self) -> None:
         self._accumulated_grad = {}
+
+
+class Adadelta(Optimizer):
+    """Adadelta optimizer.
+
+    An extension of AdaGrad that seeks to reduce its aggressive, monotonically
+    decreasing learning rate. Instead of accumulating all past squared gradients,
+    Adadelta limits the window of accumulated past gradients using an exponentially
+    decaying average.
+
+    Args:
+        learning_rate: Initial learning rate (not typically used, defaults to 1.0)
+        rho: Decay rate for exponential moving averages
+        epsilon: Small constant for numerical stability
+        weight_decay: L2 regularization factor
+
+    Reference:
+        Zeiler, 2012: "ADADELTA: An Adaptive Learning Rate Method"
+
+    Example:
+        optimizer = Adadelta(rho=0.95)
+    """
+
+    def __init__(
+        self,
+        learning_rate: float = 1.0,
+        rho: float = 0.95,
+        epsilon: float = 1e-6,
+        weight_decay: float = 0.0,
+    ):
+        self._learning_rate = learning_rate
+        self.rho = rho
+        self.epsilon = epsilon
+        self.weight_decay = weight_decay
+        self._avg_sq_grad: Dict[int, np.ndarray] = {}  # E[g^2]
+        self._avg_sq_delta: Dict[int, np.ndarray] = {}  # E[dx^2]
+
+    def update(
+        self, param_id: int, weights: np.ndarray, gradient: np.ndarray
+    ) -> np.ndarray:
+        if param_id not in self._avg_sq_grad:
+            self._avg_sq_grad[param_id] = np.zeros_like(weights)
+            self._avg_sq_delta[param_id] = np.zeros_like(weights)
+
+        # Apply weight decay
+        if self.weight_decay > 0:
+            gradient = gradient + self.weight_decay * weights
+
+        avg_sq_grad = self._avg_sq_grad[param_id]
+        avg_sq_delta = self._avg_sq_delta[param_id]
+
+        # Update running average of squared gradients
+        avg_sq_grad = self.rho * avg_sq_grad + (1 - self.rho) * (gradient**2)
+        self._avg_sq_grad[param_id] = avg_sq_grad
+
+        # Compute parameter update using RMS of previous updates
+        rms_delta = np.sqrt(avg_sq_delta + self.epsilon)
+        rms_grad = np.sqrt(avg_sq_grad + self.epsilon)
+        delta = -rms_delta / rms_grad * gradient
+
+        # Update running average of squared parameter updates
+        avg_sq_delta = self.rho * avg_sq_delta + (1 - self.rho) * (delta**2)
+        self._avg_sq_delta[param_id] = avg_sq_delta
+
+        return weights + self._learning_rate * delta
+
+    def reset(self) -> None:
+        self._avg_sq_grad = {}
+        self._avg_sq_delta = {}
+
+
+class Nadam(Optimizer):
+    """Nadam optimizer (Adam with Nesterov momentum).
+
+    Incorporates Nesterov momentum into Adam optimizer for potentially
+    faster convergence.
+
+    Args:
+        learning_rate: Learning rate
+        beta1: Exponential decay rate for first moment estimates
+        beta2: Exponential decay rate for second moment estimates
+        epsilon: Small constant for numerical stability
+        weight_decay: L2 regularization factor
+
+    Reference:
+        Dozat, 2016: "Incorporating Nesterov Momentum into Adam"
+
+    Example:
+        optimizer = Nadam(learning_rate=0.001)
+    """
+
+    def __init__(
+        self,
+        learning_rate: float = 0.001,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        epsilon: float = 1e-8,
+        weight_decay: float = 0.0,
+    ):
+        self._learning_rate = learning_rate
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
+        self.weight_decay = weight_decay
+        self._m: Dict[int, np.ndarray] = {}  # First moment
+        self._v: Dict[int, np.ndarray] = {}  # Second moment
+        self._t: int = 0  # Timestep
+
+    def update(
+        self, param_id: int, weights: np.ndarray, gradient: np.ndarray
+    ) -> np.ndarray:
+        # Initialize state for this parameter if needed
+        if param_id not in self._m:
+            self._m[param_id] = np.zeros_like(weights)
+            self._v[param_id] = np.zeros_like(weights)
+
+        # Increment timestep (once per step, not per parameter)
+        if not hasattr(self, "_step_called"):
+            self._t += 1
+
+        m = self._m[param_id]
+        v = self._v[param_id]
+
+        # Update biased first moment estimate
+        m = self.beta1 * m + (1 - self.beta1) * gradient
+        self._m[param_id] = m
+
+        # Update biased second raw moment estimate
+        v = self.beta2 * v + (1 - self.beta2) * (gradient**2)
+        self._v[param_id] = v
+
+        # Bias correction
+        m_hat = m / (1 - self.beta1**self._t)
+        v_hat = v / (1 - self.beta2**self._t)
+
+        # Nesterov momentum: use the corrected gradient estimate
+        # m_nesterov = beta1 * m_hat + (1 - beta1) * gradient / (1 - beta1**t)
+        g_prime = gradient / (1 - self.beta1**self._t)
+        m_nesterov = self.beta1 * m_hat + (1 - self.beta1) * g_prime
+
+        # AdamW-style weight decay
+        if self.weight_decay > 0:
+            weights = weights - self._learning_rate * self.weight_decay * weights
+
+        # Update weights with Nesterov momentum
+        return weights - self._learning_rate * m_nesterov / (np.sqrt(v_hat) + self.epsilon)
+
+    def step(self, layers) -> None:
+        """Update all parameters, incrementing timestep once."""
+        self._t += 1
+        self._step_called = True
+        super().step(layers)
+        del self._step_called
+
+    def reset(self) -> None:
+        self._m = {}
+        self._v = {}
+        self._t = 0
