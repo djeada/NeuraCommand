@@ -7,9 +7,10 @@ This directory contains practical examples and real-world use cases that demonst
 - `digit_recognition`: An example of training a neural network to recognize handwritten digits.
 - `linear_regression`: Demonstrates linear regression, a fundamental technique in predictive modeling.
 - `logical_operations`: Shows how neural networks can be used to perform logical operations.
-- `non_linear_classification`: Demonstrates classification of non-linearly separable data using the make_moons dataset.
 - `schroedinger_equation`: Illustrates the use of neural networks in solving the Schrödinger equation.
 - `snake_ai`: An example of training an AI agent to play the game of Snake.
+
+**Note:** For non-linear classification (make_moons dataset), see the Jupyter notebook at `notebooks/08_non_linear_classification.ipynb`.
 
 ## Usage
 
