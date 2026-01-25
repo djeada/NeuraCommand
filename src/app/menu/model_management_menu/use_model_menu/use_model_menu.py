@@ -1,9 +1,11 @@
+"""Use model menu for predictions, training, and export."""
+
 from app.menu.menu_interface import AbstractMenu, ChoiceBasedMenu
-from app.menu.model_managment_menu.io_menu.save_pickle_menu import SavePickleMenu
-from app.menu.model_managment_menu.use_model_menu.make_prediction_menu import (
+from app.menu.model_management_menu.io_menu.save_pickle_menu import SavePickleMenu
+from app.menu.model_management_menu.use_model_menu.make_prediction_menu import (
     MakePredictionMenu,
 )
-from app.menu.model_managment_menu.use_model_menu.train_network_menu import (
+from app.menu.model_management_menu.use_model_menu.train_network_menu import (
     TrainNetworkMenu,
 )
 from neura_command.deprecated.feed_forward_network.feed_forward_network import (

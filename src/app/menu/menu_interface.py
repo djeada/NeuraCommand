@@ -1,7 +1,4 @@
-import logging
-from abc import ABC
-from typing import Dict, Union, Callable
-
+"""Menu interface classes for the interactive CLI application."""
 
 import logging
 from abc import ABC, abstractmethod
@@ -9,6 +6,8 @@ from typing import Dict, Union, Callable, List
 
 
 class AbstractMenu(ABC):
+    """Abstract base class for menu implementations."""
+
     def __init__(
         self,
         name: str,
@@ -37,19 +36,23 @@ class AbstractMenu(ABC):
 
     @abstractmethod
     def display_menu(self):
+        """Display the menu options."""
         pass
 
     @abstractmethod
     def process_choice(self, choice: str):
+        """Process the user's choice."""
         pass
 
 
 class ChoiceBasedMenu(AbstractMenu):
+    """A menu that presents numbered choices to the user."""
+
     def display_menu(self):
-        """Displays the menu options for a choice-based menu."""
+        """Displays the menu options with their actual keys."""
         print(f"\n--- {self.name} ---")
-        for i, (key, option) in enumerate(self.menu_options.items()):
-            print(f"{i + 1}. {option['text']}")
+        for key, option in self.menu_options.items():
+            print(f"{key}. {option['text']}")
 
     def process_choice(self, choice: str):
         """Processes the user's choice for a choice-based menu."""
@@ -66,6 +69,8 @@ class ChoiceBasedMenu(AbstractMenu):
 
 
 class StepBasedMenu(AbstractMenu):
+    """A menu that guides the user through a series of steps."""
+
     def __init__(self, *args, steps: List[Callable], **kwargs):
         super().__init__(*args, **kwargs)
         self.steps = steps

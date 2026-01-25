@@ -1,4 +1,12 @@
+"""
+Command handler for the NeuraCommand CLI.
+
+Manages parsing and execution of CLI commands using argparse subparsers
+for a standard, user-friendly command-line experience.
+"""
+
 import argparse
+import sys
 
 from app.commands.create_network_command import CreateNetworkCommand
 from app.commands.predict_command import PredictCommand
@@ -15,6 +23,19 @@ except ImportError:
 
 
 class CommandHandler:
+    """Handles CLI command parsing and execution."""
+
+    # Command descriptions for help text
+    COMMAND_DESCRIPTIONS = {
+        "create": "Create a new neural network from a JSON architecture file",
+        "train": "Train an existing neural network model",
+        "predict": "Make predictions using a trained model",
+        "info": "Display information about a saved model",
+        "export": "Export model for deployment",
+        "analyze": "Analyze model architecture, weights, and performance",
+        "visualize": "Visualize training progress from history file",
+    }
+
     def __init__(self):
         self.command_map = {
             "create": CreateNetworkCommand,
@@ -26,46 +47,91 @@ class CommandHandler:
             "visualize": VisualizeCommand,
         }
         self.parser = self._create_parser()
-        self.args, unknown_args = self.parser.parse_known_args()
-
-        if self.args.version:
-            print(f"neura_command {__version__}")
-            exit(0)
-
-        self._handle_arguments(unknown_args)
+        self.args = self._parse_arguments()
 
     def _create_parser(self):
-        parser = argparse.ArgumentParser(description="Neural Network Command Line Tool")
+        """Create the main argument parser with subparsers for each command."""
+        parser = argparse.ArgumentParser(
+            prog="neura_command",
+            description="NeuraCommand - Neural Network Command Line Tool",
+            epilog="Use '%(prog)s <command> --help' for more information on a specific command.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
         parser.add_argument(
             "--version",
-            action="store_true",
+            "-v",
+            action="version",
+            version=f"neura_command {__version__}",
             help="Show version number and exit",
         )
+
+        # Create subparsers for each command
+        subparsers = parser.add_subparsers(
+            title="commands",
+            dest="command",
+            metavar="<command>",
+            help="Available commands",
+        )
+
+        # Register each command with its subparser
+        for name, command_class in self.command_map.items():
+            description = self.COMMAND_DESCRIPTIONS.get(name, "")
+            subparser = subparsers.add_parser(
+                name,
+                help=description,
+                description=description,
+                formatter_class=argparse.RawDescriptionHelpFormatter,
+            )
+            command_class.add_arguments(subparser)
+
+        # Also support legacy --action syntax for backward compatibility
         parser.add_argument(
             "--action",
             type=str,
             choices=self.command_map.keys(),
-            required=False,
-            help="The action to perform (create, train, predict, info, export, analyze, visualize)",
+            dest="legacy_action",
+            help=argparse.SUPPRESS,  # Hidden from help for cleaner output
         )
+
         return parser
 
-    def _handle_arguments(self, unknown_args):
-        if not self.args.action:
-            self.parser.error("--action is required unless --version is specified")
-        command_class = self.command_map.get(self.args.action)
-        if command_class:
-            # Create a new subparser for the command
-            subparser = argparse.ArgumentParser()
-            command_class.add_arguments(subparser)
-            self.command_args = subparser.parse_args(unknown_args)
-        else:
-            raise ValueError(f"Unknown command: {self.args.action}")
+    def _parse_arguments(self):
+        """Parse command line arguments with support for both new and legacy syntax."""
+        # First, parse known args to check for legacy --action
+        args, remaining = self.parser.parse_known_args()
+
+        # Handle legacy --action syntax
+        if args.legacy_action and not getattr(args, 'command', None):
+            args.command = args.legacy_action
+            # Re-parse with the subcommand's arguments
+            command_class = self.command_map.get(args.command)
+            if command_class:
+                subparser = argparse.ArgumentParser(
+                    prog=f"neura_command --action {args.command}",
+                    description=self.COMMAND_DESCRIPTIONS.get(args.command, ""),
+                )
+                command_class.add_arguments(subparser)
+                subargs = subparser.parse_args(remaining)
+                # Merge subargs into args
+                for key, value in vars(subargs).items():
+                    setattr(args, key, value)
+
+        return args
 
     def execute_command(self):
-        command = self.command_map.get(self.args.action)
-        if command:
-            command_instance = command(self.command_args)
+        """Execute the parsed command."""
+        command = getattr(self.args, 'command', None)
+        if not command:
+            self.parser.print_help()
+            print("\nError: Please specify a command.")
+            print("Use 'neura_command <command> --help' for more information on a command.")
+            sys.exit(1)
+
+        command_class = self.command_map.get(command)
+        if command_class:
+            command_instance = command_class(self.args)
             command_instance.execute()
         else:
-            print("No valid command provided.")
+            print(f"Error: Unknown command '{command}'")
+            self.parser.print_help()
+            sys.exit(1)

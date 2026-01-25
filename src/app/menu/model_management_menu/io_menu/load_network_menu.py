@@ -1,6 +1,8 @@
+"""Load network menu for loading models from disk."""
+
 from app.menu.menu_interface import AbstractMenu, StepBasedMenu
 from app.menu.architecture_management_menu.io_menu.load_json_menu import LoadJsonMenu
-from app.menu.model_managment_menu.io_menu.load_pickle_menu import LoadPickleMenu
+from app.menu.model_management_menu.io_menu.load_pickle_menu import LoadPickleMenu
 
 
 class LoadNetworkMenu(StepBasedMenu):
