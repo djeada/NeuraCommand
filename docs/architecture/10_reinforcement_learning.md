@@ -391,32 +391,15 @@ def softmax_action(q_values, temperature=1.0):
     return np.random.choice(len(q_values), p=probs)
 ```
 
-## RL in NeuraCommand: Snake AI Example
+## RL in NeuraCommand: Snake AI Notebook
 
-The repository includes a Snake AI demo that uses RL concepts:
+The repository includes a Snake AI notebook that applies Q-learning:
 
-```python
-# From demo/practical_demos/snake_ai/
-# The snake learns to:
-# - Navigate toward food
-# - Avoid walls and itself
-# - Maximize score
-
-# State representation:
-# - Distance to food (4 directions)
-# - Danger detection (3 directions)
-# - Current direction
-
-# Actions:
-# - Go straight
-# - Turn left
-# - Turn right
-
-# Reward:
-# - +10 for eating food
-# - -10 for collision
-# - Small penalty for each step (encourages efficiency)
-```
+- **Notebook**: `notebooks/12_snake_ai.ipynb`
+- **Goal**: learn to seek food, avoid collisions, and maximize score
+- **State**: danger straight/left/right, food direction, current heading
+- **Actions**: straight, turn left, turn right
+- **Reward**: +10 for food, -10 for collision, small step penalty
 
 ## Reward Shaping
 

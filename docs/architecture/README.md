@@ -114,8 +114,19 @@ To get the most from this documentation:
 ## Related Resources
 
 - [Main NeuraCommand README](../../README.md)
-- [Concept Demos](../../demo/concept_demos/README.md)
-- [Practical Demos](../../demo/practical_demos/README.md)
+- [Notebooks: Quick Start](../../notebooks/01_quick_start.ipynb)
+- [Notebooks: Linear Regression](../../notebooks/02_linear_regression.ipynb)
+- [Notebooks: Logical Operations](../../notebooks/03_logical_operations.ipynb)
+- [Notebooks: Digit Recognition](../../notebooks/04_digit_recognition.ipynb)
+- [Notebooks: Model Serialization](../../notebooks/05_model_serialization.ipynb)
+- [Notebooks: Quantization for Edge](../../notebooks/06_quantization_edge.ipynb)
+- [Notebooks: GPU Training](../../notebooks/07_gpu_training.ipynb)
+- [Notebooks: Non-Linear Classification](../../notebooks/08_non_linear_classification.ipynb)
+- [Notebooks: Gradient Descent](../../notebooks/09_gradient_descent.ipynb)
+- [Notebooks: Backpropagation](../../notebooks/10_backpropagation.ipynb)
+- [Notebooks: Perceptron Learning](../../notebooks/11_perceptron_learning.ipynb)
+- [Notebooks: Snake AI](../../notebooks/12_snake_ai.ipynb)
+- [Notebooks: Schrodinger Equation](../../notebooks/13_schrodinger_equation.ipynb)
 
 ## Contributing
 
