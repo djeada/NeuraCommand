@@ -6,7 +6,7 @@ from app.menu.model_managment_menu.use_model_menu.make_prediction_menu import (
 from app.menu.model_managment_menu.use_model_menu.train_network_menu import (
     TrainNetworkMenu,
 )
-from neura_command.network.feed_forward_network.feed_forward_network import (
+from neura_command.deprecated.feed_forward_network.feed_forward_network import (
     FeedForwardNetwork,
 )
 

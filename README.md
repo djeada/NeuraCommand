@@ -40,16 +40,16 @@ This command should return the version number of NeuraCommand, indicating that i
 
 ## Usage of NeuraCommand CLI
 
-The NeuraCommand CLI offers three main actions: `create`, `train`, and `predict`. Each action is equipped with specific options to tailor its functionality.
+The NeuraCommand CLI offers several actions: `create`, `train`, `predict`, `info`, `export`, `analyze`, and `visualize`. Each action is equipped with specific options to tailor its functionality.
 
 ```
-python main.py --action {create,train,predict}
+python main.py --action {create,train,predict,info,export,analyze,visualize}
 ```
 
 Options:
 
 - `-h`, `--help`: Show the help message and exit.
-- `--action {create,train,predict}`: Choose the action to perform.
+- `--action {create,train,predict,info,export,analyze,visualize}`: Choose the action to perform.
 
 ### Create
 
@@ -81,6 +81,8 @@ Options:
 - `--epochs`: [Optional] Number of training epochs. Defaults to 100.
 - `--overwrite`: [Optional] Flag to indicate if the existing .pkl file should be overwritten after training.
 - `--output-model-pkl`: [Optional] Custom path to save the trained network model file (.pkl). Required if --overwrite is not set.
+- `--save-history`: [Optional] Path to save training history as JSON file for later visualization.
+- `--show-summary`: [Optional] Display training summary after training completes.
 
 ### Predict
 Use the predict action to make predictions using a trained model. You need to provide the model `.pkl` file and input data. Additionally, specify how you want to output the predictions.
@@ -103,6 +105,61 @@ Options:
 - `--input-csv`: Path to the input CSV file. The format of this file should match the input requirements of the model.
 - `--output-mode`: Choose 'display' to show predictions on stdout or 'save' to save them to a CSV file.
 - `--output-csv`: [Required if output-mode is 'save'] Path to save the prediction results as a CSV file.
+
+### Analyze
+
+Use the `analyze` action to perform detailed network analytics and diagnostics. This includes architecture analysis, weight statistics, performance metrics, and error analysis.
+
+Example:
+
+```
+python main.py --action analyze --model path/to/model
+```
+
+To analyze with test data:
+
+```
+python main.py --action analyze --model path/to/model --features-csv path/to/features.csv --targets-csv path/to/targets.csv
+```
+
+Options:
+
+- `--model`: Path to model (without extension).
+- `--features-csv`: [Optional] Path to CSV file with input features for analysis.
+- `--targets-csv`: [Optional] Path to CSV file with target values for error analysis.
+- `--analysis-type`: Type of analysis to perform. Choices: `architecture`, `weights`, `performance`, `errors`, `all`. Default: `all`.
+- `--format`: Output format. Choices: `text`, `json`. Default: `text`.
+- `--task-type`: Task type for appropriate metrics. Choices: `regression`, `classification`. Default: `regression`.
+
+The analyze command provides:
+- **Architecture Analysis**: Layer-by-layer parameter counts, memory usage, optimizer, and loss function details.
+- **Weight Statistics**: Per-layer and global statistics including mean, std, min/max values, and near-zero ratios.
+- **Performance Metrics**: For regression (MSE, RMSE, MAE, R², MAPE) or classification (accuracy, precision, recall, F1, confusion matrix).
+- **Error Analysis**: Error distribution, percentiles, worst predictions, and error breakdown by target range.
+
+### Visualize
+
+Use the `visualize` action to visualize training progress with ASCII charts in the terminal.
+
+Example:
+
+```
+python main.py --action visualize --history-json path/to/training_history.json
+```
+
+Options:
+
+- `--history-json`: Path to training history JSON file (saved from training with `--save-history`).
+- `--metric`: Metric to visualize. Default: `loss`.
+- `--width`: Width of ASCII chart. Default: 60.
+- `--height`: Height of ASCII chart. Default: 20.
+- `--format`: Output format. Choices: `ascii`, `json`, `table`. Default: `ascii`.
+
+The visualize command provides:
+- **ASCII Charts**: Terminal-friendly line charts showing training progress over epochs.
+- **Table Output**: Epoch-by-epoch values in tabular format.
+- **JSON Output**: Structured data with summary statistics for programmatic use.
+- **Train/Val Gap Analysis**: Automatic overfitting detection when both training and validation losses are present.
 
 ## Quickstart for NeuraCommand package
 

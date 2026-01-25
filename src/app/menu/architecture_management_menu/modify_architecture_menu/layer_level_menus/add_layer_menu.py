@@ -2,7 +2,7 @@ from app.menu.architecture_management_menu.modify_architecture_menu.perceptron_l
     AddPerceptronMenu,
 )
 from app.menu.menu_interface import AbstractMenu, StepBasedMenu
-from neura_command.network.network_builder.network_builder import NetworkBuilder
+from neura_command.deprecated.network_builder.network_builder import NetworkBuilder
 
 
 class AddLayerMenu(StepBasedMenu):

@@ -1,10 +1,10 @@
 import json
 import logging
 from app.commands.base_command import BaseCommand
-from neura_command.network.feed_forward_network.feed_forward_network_io import (
+from neura_command.deprecated.feed_forward_network.feed_forward_network_io import (
     FeedForwardNetworkIO,
 )
-from neura_command.network.network_builder.network_builder import NetworkBuilder
+from neura_command.deprecated.network_builder.network_builder import NetworkBuilder
 
 
 class CreateNetworkCommand(BaseCommand):

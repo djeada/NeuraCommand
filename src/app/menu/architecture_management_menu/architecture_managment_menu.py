@@ -3,7 +3,7 @@ from app.menu.architecture_management_menu.modify_architecture_menu.modify_archi
     ModifyArchitectureMenu,
 )
 from app.menu.menu_interface import AbstractMenu, ChoiceBasedMenu
-from neura_command.network.network_builder.network_builder import NetworkBuilder
+from neura_command.deprecated.network_builder.network_builder import NetworkBuilder
 
 
 class ArchitectureManagementMenu(ChoiceBasedMenu):

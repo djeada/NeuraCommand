@@ -1,7 +1,7 @@
 import numpy as np
 
 from app.menu.menu_interface import StepBasedMenu, AbstractMenu
-from neura_command.network.feed_forward_network.feed_forward_network import (
+from neura_command.deprecated.feed_forward_network.feed_forward_network import (
     FeedForwardNetwork,
 )
 

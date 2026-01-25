@@ -4,7 +4,7 @@ import numpy as np
 
 from neura_command.network_utils.activation_functions import ActivationFunction
 from neura_command.network_utils.loss_functions import DifferenceLoss, LossFunction
-from neura_command.neuron.neuron_interface import NeuronInterface
+from neura_command.deprecated.neuron.neuron_interface import NeuronInterface
 
 
 class Perceptron(NeuronInterface):

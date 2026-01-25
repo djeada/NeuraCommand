@@ -1,5 +1,5 @@
 from app.menu.menu_interface import AbstractMenu, StepBasedMenu
-from neura_command.network.network_builder.network_builder import NetworkBuilder
+from neura_command.deprecated.network_builder.network_builder import NetworkBuilder
 
 
 class RemoveLayerMenu(StepBasedMenu):

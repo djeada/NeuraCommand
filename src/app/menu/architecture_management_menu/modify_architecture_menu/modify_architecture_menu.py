@@ -9,7 +9,7 @@ from app.menu.architecture_management_menu.modify_architecture_menu.layer_level_
 )
 from app.menu.architecture_management_menu.io_menu.save_json_menu import SaveNetworkMenu
 from app.menu.menu_interface import ChoiceBasedMenu, AbstractMenu
-from neura_command.network.network_builder.network_builder import NetworkBuilder
+from neura_command.deprecated.network_builder.network_builder import NetworkBuilder
 
 
 class ModifyArchitectureMenu(ChoiceBasedMenu):
