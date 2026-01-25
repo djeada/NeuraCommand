@@ -10,6 +10,8 @@ This directory contains practical examples and real-world use cases that demonst
 - `schroedinger_equation`: Illustrates the use of neural networks in solving the Schrödinger equation.
 - `snake_ai`: An example of training an AI agent to play the game of Snake.
 
+**Note:** For non-linear classification (make_moons dataset), see the Jupyter notebook at `notebooks/08_non_linear_classification.ipynb`.
+
 ## Usage
 
 Each subdirectory in the `practical_demos` section contains its own `main.py` script and a README file with detailed instructions on how to run and use the example. To execute a specific example, navigate to its directory and follow the instructions provided in the README.
