@@ -2,7 +2,7 @@ from typing import List, Tuple
 
 import numpy as np
 
-from neura_command.neuron.perceptron.perceptron import Perceptron
+from neura_command.deprecated.neuron.perceptron.perceptron import Perceptron
 
 
 class Layer:

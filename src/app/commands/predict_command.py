@@ -3,7 +3,7 @@ import logging
 import numpy as np
 
 from app.commands.base_command import BaseCommand
-from neura_command.network.feed_forward_network.feed_forward_network_io import (
+from neura_command.deprecated.feed_forward_network.feed_forward_network_io import (
     FeedForwardNetworkIO,
 )
 

@@ -5,6 +5,8 @@ from app.commands.predict_command import PredictCommand
 from app.commands.train_network_command import TrainNetworkCommand
 from app.commands.info_command import InfoCommand
 from app.commands.export_command import ExportCommand
+from app.commands.analyze_command import AnalyzeCommand
+from app.commands.visualize_command import VisualizeCommand
 
 try:
     from neura_command import __version__
@@ -20,6 +22,8 @@ class CommandHandler:
             "predict": PredictCommand,
             "info": InfoCommand,
             "export": ExportCommand,
+            "analyze": AnalyzeCommand,
+            "visualize": VisualizeCommand,
         }
         self.parser = self._create_parser()
         self.args, unknown_args = self.parser.parse_known_args()
@@ -42,7 +46,7 @@ class CommandHandler:
             type=str,
             choices=self.command_map.keys(),
             required=False,
-            help="The action to perform (create, train, predict, info, export)",
+            help="The action to perform (create, train, predict, info, export, analyze, visualize)",
         )
         return parser
 

@@ -1,10 +1,10 @@
-from neura_command.layer.layer import Layer
-from neura_command.network.feed_forward_network.feed_forward_network import (
+from neura_command.deprecated.layer.layer import Layer
+from neura_command.deprecated.feed_forward_network.feed_forward_network import (
     FeedForwardNetwork,
 )
 from neura_command.network_utils.activation_functions import *
 from neura_command.network_utils.loss_functions import *
-from neura_command.neuron.perceptron.perceptron import Perceptron
+from neura_command.deprecated.neuron.perceptron.perceptron import Perceptron
 
 
 class StringNetworkBuilder:

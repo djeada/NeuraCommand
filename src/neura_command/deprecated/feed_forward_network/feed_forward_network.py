@@ -1,7 +1,7 @@
 import numpy as np
 from typing import List, Optional, Callable
 
-from neura_command.layer.layer import Layer
+from neura_command.deprecated.layer.layer import Layer
 from neura_command.network_utils.loss_functions import LossFunction
 
 import logging
