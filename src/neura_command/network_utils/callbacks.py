@@ -34,7 +34,7 @@ class Callback(ABC):
 
 class EarlyStopping(Callback):
     """Stop training when a monitored metric has stopped improving.
-    
+
     Example:
         early_stop = EarlyStopping(monitor='val_loss', patience=5, min_delta=0.001)
         network.train(X, y, epochs=100, callbacks=[early_stop])
@@ -50,14 +50,14 @@ class EarlyStopping(Callback):
     ):
         """
         Initialize EarlyStopping callback.
-        
+
         Args:
             monitor: Metric name to monitor (e.g., 'val_loss', 'loss').
             min_delta: Minimum change to qualify as an improvement.
             patience: Number of epochs with no improvement after which training stops.
-            mode: 'min' or 'max'. In 'min' mode, training stops when monitored 
+            mode: 'min' or 'max'. In 'min' mode, training stops when monitored
                   quantity stops decreasing; in 'max' mode when it stops increasing.
-            restore_best_weights: Whether to restore model weights from the epoch 
+            restore_best_weights: Whether to restore model weights from the epoch
                                   with the best value of the monitored quantity.
         """
         self.monitor = monitor
@@ -65,7 +65,7 @@ class EarlyStopping(Callback):
         self.patience = patience
         self.mode = mode
         self.restore_best_weights = restore_best_weights
-        
+
         self.best: float = np.inf if mode == "min" else -np.inf
         self.best_epoch: int = 0
         self.best_weights: Optional[List[np.ndarray]] = None
@@ -81,7 +81,7 @@ class EarlyStopping(Callback):
     def on_epoch_end(self, epoch: int, logs: Optional[Dict[str, Any]] = None) -> bool:
         logs = logs or {}
         current = logs.get(self.monitor)
-        
+
         if current is None:
             return False
 
@@ -96,7 +96,7 @@ class EarlyStopping(Callback):
             if self.wait >= self.patience:
                 self.stopped_epoch = epoch
                 return True  # Signal to stop training
-        
+
         return False
 
     def _is_improvement(self, current: float) -> bool:
@@ -112,14 +112,14 @@ class EarlyStopping(Callback):
 
 class LearningRateScheduler(Callback):
     """Learning rate scheduler callback.
-    
+
     Example:
         def schedule(epoch, lr):
             if epoch < 10:
                 return lr
             else:
                 return lr * 0.9
-        
+
         lr_scheduler = LearningRateScheduler(schedule)
         network.train(X, y, epochs=100, callbacks=[lr_scheduler])
     """
@@ -127,9 +127,9 @@ class LearningRateScheduler(Callback):
     def __init__(self, schedule):
         """
         Initialize LearningRateScheduler.
-        
+
         Args:
-            schedule: A function that takes an epoch index (int) and current 
+            schedule: A function that takes an epoch index (int) and current
                       learning rate (float) and returns a new learning rate.
         """
         self.schedule = schedule

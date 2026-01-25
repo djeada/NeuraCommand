@@ -23,11 +23,11 @@ class CommandHandler:
         }
         self.parser = self._create_parser()
         self.args, unknown_args = self.parser.parse_known_args()
-        
+
         if self.args.version:
             print(f"neura_command {__version__}")
             exit(0)
-        
+
         self._handle_arguments(unknown_args)
 
     def _create_parser(self):

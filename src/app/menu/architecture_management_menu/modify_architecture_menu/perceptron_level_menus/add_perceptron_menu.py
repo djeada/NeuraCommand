@@ -27,9 +27,9 @@ class AddPerceptronMenu(StepBasedMenu):
         )
 
     def set_activation_function(self):
-        self.perceptron_config[
-            "activation_func"
-        ] = self.get_activation_function_choice()
+        self.perceptron_config["activation_func"] = (
+            self.get_activation_function_choice()
+        )
 
     def set_loss_function(self):
         self.perceptron_config["loss_func"] = self.get_loss_function_choice()

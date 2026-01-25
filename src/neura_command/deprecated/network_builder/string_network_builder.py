@@ -16,7 +16,7 @@ class StringNetworkBuilder:
 
     def add_layer(self, input_size: int, output_size: int, activation: str):
         """Adds a layer to the network.
-        
+
         Creates a single perceptron with the specified input and output sizes.
         This is the correct behavior for a dense/fully-connected layer.
         """

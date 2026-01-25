@@ -74,9 +74,9 @@ class TestDenseLayer:
     def test_repr(self):
         layer = Dense(10, 5, activation=ReLUActivation())
         r = repr(layer)
-        assert 'Dense' in r
-        assert '10' in r
-        assert '5' in r
+        assert "Dense" in r
+        assert "10" in r
+        assert "5" in r
 
 
 class TestDropoutLayer:
@@ -194,14 +194,14 @@ class TestActivationLayers:
         np.testing.assert_almost_equal(np.sum(output), 1.0)
 
     def test_activation_from_string(self):
-        layer = Activation('relu')
+        layer = Activation("relu")
         x = np.array([[-1, 1]])
         output = layer.forward(x)
         np.testing.assert_array_equal(output, [[0, 1]])
 
     def test_activation_unknown(self):
         with pytest.raises(ValueError):
-            Activation('unknown_activation')
+            Activation("unknown_activation")
 
     def test_backward(self):
         layer = ReLU()

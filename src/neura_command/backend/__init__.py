@@ -32,12 +32,12 @@ from neura_command.backend.array_backend import (
 )
 
 __all__ = [
-    'get_backend',
-    'get_array_module',
-    'set_default_device',
-    'get_default_device',
-    'to_device',
-    'to_numpy',
-    'is_cupy_available',
-    'Backend',
+    "get_backend",
+    "get_array_module",
+    "set_default_device",
+    "get_default_device",
+    "to_device",
+    "to_numpy",
+    "is_cupy_available",
+    "Backend",
 ]

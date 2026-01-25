@@ -5,7 +5,7 @@ import numpy as np
 
 class Dropout:
     """Dropout layer for regularization.
-    
+
     Randomly sets a fraction of input units to 0 during training,
     which helps prevent overfitting.
     """
@@ -13,7 +13,7 @@ class Dropout:
     def __init__(self, rate: float = 0.5):
         """
         Initialize Dropout layer.
-        
+
         Args:
             rate: Fraction of the input units to drop (0 to 1).
         """

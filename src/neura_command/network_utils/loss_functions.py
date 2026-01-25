@@ -51,7 +51,7 @@ class HuberLoss(LossFunction):
         error = np.abs(y_true - y_pred)
         quadratic = np.minimum(error, self.delta)
         linear = error - quadratic
-        return np.mean(0.5 * quadratic ** 2 + self.delta * linear)
+        return np.mean(0.5 * quadratic**2 + self.delta * linear)
 
     def derivative(self, y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
         error = y_pred - y_true

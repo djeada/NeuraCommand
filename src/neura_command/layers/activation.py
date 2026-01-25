@@ -25,12 +25,12 @@ from neura_command.network_utils.activation_functions import (
 
 class Activation(Layer):
     """Activation function as a layer.
-    
+
     Wraps an ActivationFunction to be used as a standalone layer.
-    
+
     Args:
         activation: ActivationFunction instance or string name
-        
+
     Example:
         model = Sequential([
             Dense(784, 128),
@@ -39,19 +39,19 @@ class Activation(Layer):
             Activation('softmax'),
         ])
     """
-    
+
     _activation_map = {
-        'relu': ReLUActivation,
-        'sigmoid': SigmoidActivation,
-        'tanh': TanhActivation,
-        'softmax': SoftmaxActivation,
-        'leaky_relu': LeakyReLUActivation,
-        'leakyrelu': LeakyReLUActivation,
-        'elu': ELUActivation,
-        'linear': LinearActivation,
-        'none': LinearActivation,
+        "relu": ReLUActivation,
+        "sigmoid": SigmoidActivation,
+        "tanh": TanhActivation,
+        "softmax": SoftmaxActivation,
+        "leaky_relu": LeakyReLUActivation,
+        "leakyrelu": LeakyReLUActivation,
+        "elu": ELUActivation,
+        "linear": LinearActivation,
+        "none": LinearActivation,
     }
-    
+
     def __init__(self, activation, device: DeviceType = None):
         if isinstance(activation, str):
             activation_lower = activation.lower()
@@ -67,24 +67,24 @@ class Activation(Layer):
             raise TypeError(
                 f"activation must be str or ActivationFunction, got {type(activation)}"
             )
-        
+
         self._input_cache = None
         self._device = device if device is not None else get_default_device()
-    
+
     def forward(self, x: np.ndarray, training: bool = True) -> np.ndarray:
         """Apply activation function."""
         self._input_cache = x
         return self.activation.compute(x)
-    
+
     def backward(self, grad: np.ndarray) -> np.ndarray:
         """Backward pass through activation."""
         return grad * self.activation.derivative(self._input_cache)
-    
-    def to(self, device: DeviceType) -> 'Activation':
+
+    def to(self, device: DeviceType) -> "Activation":
         """Move layer to specified device (no-op for activations)."""
         self._device = device
         return self
-    
+
     def __repr__(self) -> str:
         return f"Activation({self.activation.__class__.__name__})"
 
@@ -92,30 +92,35 @@ class Activation(Layer):
 # Convenience classes for common activations
 class ReLU(Activation):
     """ReLU activation layer."""
+
     def __init__(self, device: DeviceType = None):
-        super().__init__('relu', device=device)
+        super().__init__("relu", device=device)
 
 
 class Sigmoid(Activation):
     """Sigmoid activation layer."""
+
     def __init__(self, device: DeviceType = None):
-        super().__init__('sigmoid', device=device)
+        super().__init__("sigmoid", device=device)
 
 
 class Tanh(Activation):
     """Tanh activation layer."""
+
     def __init__(self, device: DeviceType = None):
-        super().__init__('tanh', device=device)
+        super().__init__("tanh", device=device)
 
 
 class Softmax(Activation):
     """Softmax activation layer."""
+
     def __init__(self, device: DeviceType = None):
-        super().__init__('softmax', device=device)
+        super().__init__("softmax", device=device)
 
 
 class LeakyReLU(Activation):
     """Leaky ReLU activation layer."""
+
     def __init__(self, alpha: float = 0.01, device: DeviceType = None):
         self.activation = LeakyReLUActivation(alpha)
         self._input_cache = None
@@ -124,6 +129,7 @@ class LeakyReLU(Activation):
 
 class ELU(Activation):
     """ELU activation layer."""
+
     def __init__(self, alpha: float = 1.0, device: DeviceType = None):
         self.activation = ELUActivation(alpha)
         self._input_cache = None

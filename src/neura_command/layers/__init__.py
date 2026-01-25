@@ -21,20 +21,20 @@ from neura_command.layers.activation import (
 
 __all__ = [
     # Base
-    'Layer',
-    'ParameterMixin',
+    "Layer",
+    "ParameterMixin",
     # Core layers
-    'Dense',
-    'Dropout',
-    'BatchNorm',
-    'Flatten',
-    'Input',
+    "Dense",
+    "Dropout",
+    "BatchNorm",
+    "Flatten",
+    "Input",
     # Activations as layers
-    'Activation',
-    'ReLU',
-    'Sigmoid',
-    'Tanh',
-    'Softmax',
-    'LeakyReLU',
-    'ELU',
+    "Activation",
+    "ReLU",
+    "Sigmoid",
+    "Tanh",
+    "Softmax",
+    "LeakyReLU",
+    "ELU",
 ]

@@ -80,7 +80,7 @@ class TestHuberLoss:
         y_true = np.array([1.0])
         y_pred = np.array([1.5])  # error = 0.5, < delta
         result = loss.compute(y_true, y_pred)
-        expected = 0.5 * 0.5 ** 2  # quadratic region
+        expected = 0.5 * 0.5**2  # quadratic region
         np.testing.assert_almost_equal(result, expected)
 
     def test_compute_large_error(self):
