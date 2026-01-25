@@ -27,13 +27,13 @@ class CommandHandler:
 
     # Command descriptions for help text
     COMMAND_DESCRIPTIONS = {
-        "create": "Create a new neural network from a JSON architecture file",
-        "train": "Train an existing neural network model",
-        "predict": "Make predictions using a trained model",
-        "info": "Display information about a saved model",
-        "export": "Export model for deployment",
-        "analyze": "Analyze model architecture, weights, and performance",
-        "visualize": "Visualize training progress from history file",
+        "create": "Create a neural network from JSON architecture (supports modern and legacy formats)",
+        "train": "Train a neural network with configurable epochs, batch size, and learning rate",
+        "predict": "Make predictions with batch processing, confidence scores, and multiple output formats",
+        "info": "Display detailed information about a saved model",
+        "export": "Export model for deployment with optional quantization",
+        "analyze": "Analyze model architecture, weights, performance metrics, and errors",
+        "visualize": "Visualize training progress with ASCII charts from history file",
     }
 
     def __init__(self):
