@@ -1,10 +1,14 @@
+"""Model management menu for loading and working with neural network models."""
+
 from app.menu.architecture_management_menu.io_menu.load_json_menu import LoadJsonMenu
 from app.menu.menu_interface import AbstractMenu, StepBasedMenu
-from app.menu.model_managment_menu.io_menu.load_pickle_menu import LoadPickleMenu
-from app.menu.model_managment_menu.use_model_menu.use_model_menu import UseModelMenu
+from app.menu.model_management_menu.io_menu.load_pickle_menu import LoadPickleMenu
+from app.menu.model_management_menu.use_model_menu.use_model_menu import UseModelMenu
 
 
-class ModelManagmentMenu(StepBasedMenu):
+class ModelManagementMenu(StepBasedMenu):
+    """Menu for loading and managing neural network models."""
+
     def __init__(self, parent_menu: AbstractMenu):
         steps = [self.choose_file_type, self.load_file]
         super().__init__(
