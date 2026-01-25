@@ -15,28 +15,34 @@ class StringNetworkBuilder:
         self.loss = MSELoss()
 
     def add_layer(self, input_size: int, output_size: int, activation: str):
-        """Adds a layer to the network."""
+        """Adds a layer to the network.
+        
+        Creates a single perceptron with the specified input and output sizes.
+        This is the correct behavior for a dense/fully-connected layer.
+        """
         activation_func = self._get_activation_function(activation)
-        perceptrons = [
-            Perceptron(
-                input_size,
-                output_size,
-                activation_func=activation_func,
-                learning_rate=0.01,
-            )
-            for _ in range(output_size)
-        ]
-        self.layers.append(Layer(perceptrons))
+        # Create a single perceptron for the layer (dense layer)
+        perceptron = Perceptron(
+            input_size,
+            output_size,
+            activation_func=activation_func,
+            learning_rate=0.01,
+        )
+        self.layers.append(Layer([perceptron]))
 
     def _get_activation_function(self, name: str):
         """Retrieves an activation function based on its name."""
+        name = name.lower()
         functions = {
             "sigmoid": SigmoidActivation(),
             "basicsigmoid": BasicSigmoidActivation(),
             "relu": ReLUActivation(),
+            "leakyrelu": LeakyReLUActivation(),
+            "elu": ELUActivation(),
             "step": StepActivation(),
             "tanh": TanhActivation(),
             "linear": LinearActivation(),
+            "softmax": SoftmaxActivation(),
         }
         if name not in functions:
             raise ValueError(f"Unknown activation function: {name}")

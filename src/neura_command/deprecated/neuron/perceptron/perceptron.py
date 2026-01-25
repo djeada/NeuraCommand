@@ -20,13 +20,23 @@ class Perceptron(NeuronInterface):
     ) -> None:
         self.initialize_weights(input_size, output_size)
         self.activation_func = activation_func
-        self.error_func = loss_func
+        self.loss_func = loss_func
         self.learning_rate = learning_rate
         self.l1_ratio = l1_ratio
         self.l2_ratio = l2_ratio
         self.last_input = np.array([])
         self.last_output = np.array([])
         self.last_gradient = np.array([])
+
+    @property
+    def error_func(self) -> LossFunction:
+        """Deprecated: Use loss_func instead."""
+        return self.loss_func
+
+    @error_func.setter
+    def error_func(self, value: LossFunction) -> None:
+        """Deprecated: Use loss_func instead."""
+        self.loss_func = value
 
     def initialize_weights(self, input_size: int, output_size: int) -> None:
         self.weights = np.random.normal(
@@ -82,7 +92,7 @@ class Perceptron(NeuronInterface):
             f"{self.__class__.__name__}(input_size={self.input_size}, "
             f"output_size={self.output_size}, "
             f"activation_func={self.activation_func.__class__.__name__}, "
-            f"loss_func={self.error_func.__class__.__name__}, "
+            f"loss_func={self.loss_func.__class__.__name__}, "
             f"learning_rate={self.learning_rate}, "
             f"l1_ratio={self.l1_ratio}, "
             f"l2_ratio={self.l2_ratio})"

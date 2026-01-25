@@ -62,3 +62,44 @@ class TanhActivation(ActivationFunction):
 
     def derivative(self, x: np.ndarray) -> np.ndarray:
         return 1 - np.tanh(x) ** 2
+
+
+class SoftmaxActivation(ActivationFunction):
+    """Softmax activation function for multi-class classification output layers."""
+
+    def compute(self, x: np.ndarray) -> np.ndarray:
+        # Subtract max for numerical stability
+        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+        return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
+
+    def derivative(self, x: np.ndarray) -> np.ndarray:
+        # For softmax, the derivative is typically handled differently in backprop
+        # when combined with cross-entropy loss. This returns the Jacobian diagonal.
+        s = self.compute(x)
+        return s * (1 - s)
+
+
+class LeakyReLUActivation(ActivationFunction):
+    """Leaky ReLU activation function."""
+
+    def __init__(self, alpha: float = 0.01):
+        self.alpha = alpha
+
+    def compute(self, x: np.ndarray) -> np.ndarray:
+        return np.where(x > 0, x, self.alpha * x)
+
+    def derivative(self, x: np.ndarray) -> np.ndarray:
+        return np.where(x > 0, 1.0, self.alpha)
+
+
+class ELUActivation(ActivationFunction):
+    """Exponential Linear Unit activation function."""
+
+    def __init__(self, alpha: float = 1.0):
+        self.alpha = alpha
+
+    def compute(self, x: np.ndarray) -> np.ndarray:
+        return np.where(x > 0, x, self.alpha * (np.exp(x) - 1))
+
+    def derivative(self, x: np.ndarray) -> np.ndarray:
+        return np.where(x > 0, 1.0, self.alpha * np.exp(x))

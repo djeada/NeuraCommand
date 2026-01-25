@@ -35,7 +35,7 @@ class CrossEntropyLoss(LossFunction):
     def compute(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         epsilon = 1e-15  # Avoid division by zero
         y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
-        return -np.sum(y_true * np.log(y_pred))
+        return -np.mean(np.sum(y_true * np.log(y_pred), axis=-1))
 
     def derivative(self, y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
         epsilon = 1e-15  # Avoid division by zero

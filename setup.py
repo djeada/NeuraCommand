@@ -1,15 +1,13 @@
 from setuptools import find_packages, setup
 
-version = "0.1"
+version = "0.4.0"
 
 setup(
     name="neura_command",
     version=version,
     packages=find_packages("src"),
     package_dir={"": "src"},
-
-    # Use a requirements file for better dependency management
-    install_requires=open("requirements.txt").readlines(),
+    install_requires=["numpy>=1.20.0"],
 
     # Metadata about the package
     author="Adam Djellouli",
