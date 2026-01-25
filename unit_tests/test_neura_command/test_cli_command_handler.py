@@ -91,13 +91,13 @@ class TestCommandHandlerParsing:
         
         with patch.object(sys, 'argv', [
             'neura_command', 'create',
-            '--network-architecture-json', str(arch_file),
-            '--model-pkl', str(tmp_path / 'model.pkl')
+            '--architecture', str(arch_file),
+            '--output', str(tmp_path / 'model')
         ]):
             handler = CommandHandler()
             assert handler.args.command == 'create'
-            assert handler.args.network_architecture_json == str(arch_file)
-            assert handler.args.model_pkl == str(tmp_path / 'model.pkl')
+            assert handler.args.architecture == str(arch_file)
+            assert handler.args.output == str(tmp_path / 'model')
 
     def test_new_syntax_info(self):
         """Test new syntax: 'neura_command info ...'"""
@@ -147,7 +147,7 @@ class TestCommandHandlerErrors:
             assert exc_info.value.code == 2
 
         captured = capsys.readouterr()
-        assert 'required' in captured.err.lower() or 'network-architecture-json' in captured.err
+        assert 'required' in captured.err.lower() or 'architecture' in captured.err
 
 
 class TestCommandDescriptions:
@@ -159,3 +159,132 @@ class TestCommandDescriptions:
         expected_commands = ['create', 'train', 'predict', 'info', 'export', 'analyze', 'visualize']
         for cmd in expected_commands:
             assert cmd in CommandHandler.COMMAND_DESCRIPTIONS
+
+
+class TestNewCLIFeatures:
+    """Tests for the new CLI features."""
+
+    def test_create_with_verbose_flag(self, tmp_path):
+        """Test that create command accepts verbose flag."""
+        arch_file = tmp_path / "arch.json"
+        arch_file.write_text('{"layers": []}')
+        
+        with patch.object(sys, 'argv', [
+            'neura_command', 'create',
+            '--architecture', str(arch_file),
+            '--verbose'
+        ]):
+            handler = CommandHandler()
+            assert handler.args.verbose is True
+
+    def test_create_with_quiet_flag(self, tmp_path):
+        """Test that create command accepts quiet flag."""
+        arch_file = tmp_path / "arch.json"
+        arch_file.write_text('{"layers": []}')
+        
+        with patch.object(sys, 'argv', [
+            'neura_command', 'create',
+            '--architecture', str(arch_file),
+            '--quiet'
+        ]):
+            handler = CommandHandler()
+            assert handler.args.quiet is True
+
+    def test_create_with_validate_flag(self, tmp_path):
+        """Test that create command accepts validate flag."""
+        arch_file = tmp_path / "arch.json"
+        arch_file.write_text('{"layers": []}')
+        
+        with patch.object(sys, 'argv', [
+            'neura_command', 'create',
+            '--architecture', str(arch_file),
+            '--validate'
+        ]):
+            handler = CommandHandler()
+            assert handler.args.validate is True
+
+    def test_train_with_batch_size(self, tmp_path):
+        """Test train command with batch size option."""
+        # Create mock files
+        model = tmp_path / "model"
+        features = tmp_path / "features.csv"
+        targets = tmp_path / "targets.csv"
+        features.write_text("1.0,2.0\n3.0,4.0")
+        targets.write_text("0.0\n1.0")
+        
+        with patch.object(sys, 'argv', [
+            'neura_command', 'train',
+            '--model', str(model),
+            '--features-csv', str(features),
+            '--targets-csv', str(targets),
+            '--batch-size', '16',
+            '--learning-rate', '0.01'
+        ]):
+            handler = CommandHandler()
+            assert handler.args.batch_size == 16
+            assert handler.args.learning_rate == 0.01
+
+    def test_train_with_early_stopping(self, tmp_path):
+        """Test train command with early stopping option."""
+        model = tmp_path / "model"
+        features = tmp_path / "features.csv"
+        targets = tmp_path / "targets.csv"
+        features.write_text("1.0,2.0\n3.0,4.0")
+        targets.write_text("0.0\n1.0")
+        
+        with patch.object(sys, 'argv', [
+            'neura_command', 'train',
+            '--model', str(model),
+            '--features-csv', str(features),
+            '--targets-csv', str(targets),
+            '--early-stopping', '10'
+        ]):
+            handler = CommandHandler()
+            assert handler.args.early_stopping == 10
+
+    def test_predict_with_confidence(self, tmp_path):
+        """Test predict command with confidence options."""
+        input_csv = tmp_path / "input.csv"
+        input_csv.write_text("1.0,2.0\n3.0,4.0")
+        
+        with patch.object(sys, 'argv', [
+            'neura_command', 'predict',
+            '--model', '/some/model',
+            '--input-csv', str(input_csv),
+            '--show-confidence',
+            '--top-k', '3',
+            '--threshold', '0.7'
+        ]):
+            handler = CommandHandler()
+            assert handler.args.show_confidence is True
+            assert handler.args.top_k == 3
+            assert handler.args.threshold == 0.7
+
+    def test_predict_with_json_output(self, tmp_path):
+        """Test predict command with JSON output mode."""
+        input_csv = tmp_path / "input.csv"
+        input_csv.write_text("1.0,2.0\n3.0,4.0")
+        
+        with patch.object(sys, 'argv', [
+            'neura_command', 'predict',
+            '--model', '/some/model',
+            '--input-csv', str(input_csv),
+            '--output-mode', 'json',
+            '--precision', '4'
+        ]):
+            handler = CommandHandler()
+            assert handler.args.output_mode == 'json'
+            assert handler.args.precision == 4
+
+    def test_backward_compatible_arg_names(self, tmp_path):
+        """Test that legacy argument names still work."""
+        arch_file = tmp_path / "arch.json"
+        arch_file.write_text('{"layers": []}')
+        
+        # Test --network-architecture-json (legacy name for --architecture)
+        with patch.object(sys, 'argv', [
+            'neura_command', 'create',
+            '--network-architecture-json', str(arch_file),
+        ]):
+            handler = CommandHandler()
+            assert handler.args.architecture == str(arch_file)
