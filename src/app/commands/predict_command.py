@@ -183,9 +183,10 @@ class PredictCommand(BaseCommand):
         try:
             data = np.loadtxt(self.args.input_csv, delimiter=",")
             
-            # Ensure 2D
+            # Ensure 2D: 1D array could be single sample with multiple features
+            # or multiple samples with single feature. Default to multiple samples.
             if data.ndim == 1:
-                data = data.reshape(-1, 1) if len(data.shape) == 1 else data.reshape(1, -1)
+                data = data.reshape(-1, 1)
 
             self._log_info(f"Loaded {len(data)} samples from {self.args.input_csv}")
             return data

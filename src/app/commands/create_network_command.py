@@ -344,15 +344,20 @@ class CreateNetworkCommand(BaseCommand):
 
         elif layer_type == "activation":
             activation = config.get("activation", "relu").lower()
+            # Extract alpha value before using in activation map
+            alpha = config.get("alpha", 0.01 if activation == "leaky_relu" else 1.0)
             activation_map = {
                 "relu": ReLU,
                 "sigmoid": Sigmoid,
                 "tanh": Tanh,
                 "softmax": Softmax,
-                "leaky_relu": lambda: LeakyReLU(config.get("alpha", 0.01)),
-                "elu": lambda: ELU(config.get("alpha", 1.0)),
+                "leaky_relu": LeakyReLU,
+                "elu": ELU,
             }
-            return activation_map.get(activation, ReLU)()
+            activation_class = activation_map.get(activation, ReLU)
+            if activation in ("leaky_relu", "elu"):
+                return activation_class(alpha)
+            return activation_class()
 
         else:
             self._log_error(f"Unknown layer type: {layer_type}")

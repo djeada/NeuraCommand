@@ -252,15 +252,7 @@ class TrainNetworkCommand(BaseCommand):
 
     def _validate_data(self, features: np.ndarray, targets: np.ndarray) -> bool:
         """Validate that data shapes are compatible."""
-        # Ensure features are 2D
-        if features.ndim == 1:
-            features = features.reshape(-1, 1)
-
-        # Ensure targets are 2D
-        if targets.ndim == 1:
-            targets = targets.reshape(-1, 1)
-
-        # Check sample counts match
+        # Check sample counts match (works for both 1D and 2D)
         if len(features) != len(targets):
             self._log_error(
                 f"Sample count mismatch: features has {len(features)} samples, "
@@ -303,7 +295,6 @@ class TrainNetworkCommand(BaseCommand):
         val_features = features[val_indices]
         val_targets = targets[val_indices]
 
-        # Update features/targets in place is not ideal, so we note this
         self._log_info(f"Using {n_val} samples for validation, {len(train_indices)} for training")
 
         return val_features, val_targets
@@ -341,20 +332,24 @@ class TrainNetworkCommand(BaseCommand):
             if targets.ndim == 1:
                 targets = targets.reshape(-1, 1)
 
-            # Handle validation split in training data
-            if val_features is not None:
-                # Use validation data
-                n_val = len(val_features)
-                # For now, we'll just train on all data and use val for monitoring
-                # A more sophisticated approach would pass val data to train()
-                pass
-
             # Train the model
             train_kwargs = {
                 "epochs": self.args.epochs,
                 "batch_size": self.args.batch_size,
                 "verbose": getattr(self.args, 'verbose', False),
             }
+
+            # Add validation data if the model supports it
+            if val_features is not None:
+                import inspect
+                train_sig = inspect.signature(model.train)
+                if 'X_val' in train_sig.parameters:
+                    if val_features.ndim == 1:
+                        val_features = val_features.reshape(-1, 1)
+                    if val_targets.ndim == 1:
+                        val_targets = val_targets.reshape(-1, 1)
+                    train_kwargs['X_val'] = val_features
+                    train_kwargs['y_val'] = val_targets
 
             # Add callbacks if the model supports them
             if callbacks and hasattr(model, 'train'):
