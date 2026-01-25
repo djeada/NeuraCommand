@@ -7,6 +7,8 @@ from neura_command.network_utils.optimizers import (
     Adam,
     RMSprop,
     AdaGrad,
+    Adadelta,
+    Nadam,
 )
 
 
@@ -169,3 +171,112 @@ class TestAdaGrad:
 
         optimizer.reset()
         assert len(optimizer._accumulated_grad) == 0
+
+
+class TestAdadelta:
+    def test_basic_update(self):
+        optimizer = Adadelta(rho=0.95)
+        weights = np.array([1.0, 2.0, 3.0])
+        gradient = np.array([0.1, 0.2, 0.3])
+        param_id = id(weights)
+
+        new_weights = optimizer.update(param_id, weights, gradient)
+        assert not np.array_equal(new_weights, weights)
+
+    def test_no_learning_rate_dependency(self):
+        """Adadelta should work without explicit learning rate tuning."""
+        optimizer = Adadelta(rho=0.95)
+        weights = np.array([1.0, 2.0, 3.0])
+        gradient = np.array([0.1, 0.2, 0.3])
+        param_id = id(weights)
+
+        # Multiple updates should continue to make progress
+        for _ in range(10):
+            new_weights = optimizer.update(param_id, weights, gradient)
+            weights = new_weights
+
+        # Should have moved from initial position
+        assert not np.allclose(weights, [1.0, 2.0, 3.0])
+
+    def test_reset(self):
+        optimizer = Adadelta(rho=0.95)
+        weights = np.array([1.0, 2.0, 3.0])
+        gradient = np.array([0.1, 0.2, 0.3])
+        param_id = id(weights)
+
+        optimizer.update(param_id, weights, gradient)
+        assert len(optimizer._avg_sq_grad) > 0
+        assert len(optimizer._avg_sq_delta) > 0
+
+        optimizer.reset()
+        assert len(optimizer._avg_sq_grad) == 0
+        assert len(optimizer._avg_sq_delta) == 0
+
+
+class TestNadam:
+    def test_basic_update(self):
+        optimizer = Nadam(learning_rate=0.001)
+        weights = np.array([1.0, 2.0, 3.0])
+        gradient = np.array([0.1, 0.2, 0.3])
+        param_id = id(weights)
+
+        optimizer._t = 1
+        new_weights = optimizer.update(param_id, weights, gradient)
+        assert not np.array_equal(new_weights, weights)
+
+    def test_multiple_updates(self):
+        optimizer = Nadam(learning_rate=0.001)
+        weights = np.array([1.0, 2.0, 3.0])
+        gradient = np.array([0.1, 0.2, 0.3])
+        param_id = id(weights)
+
+        for i in range(10):
+            optimizer._t = i + 1
+            weights = optimizer.update(param_id, weights, gradient)
+
+        assert len(optimizer._m) == 1
+        assert len(optimizer._v) == 1
+
+    def test_reset(self):
+        optimizer = Nadam(learning_rate=0.001)
+        weights = np.array([1.0, 2.0, 3.0])
+        gradient = np.array([0.1, 0.2, 0.3])
+        param_id = id(weights)
+
+        optimizer._t = 1
+        optimizer.update(param_id, weights, gradient)
+        assert len(optimizer._m) > 0
+        assert len(optimizer._v) > 0
+
+        optimizer.reset()
+        assert len(optimizer._m) == 0
+        assert len(optimizer._v) == 0
+        assert optimizer._t == 0
+
+
+class TestSGDL1Regularization:
+    def test_l1_regularization(self):
+        """Test that L1 regularization pushes weights toward zero."""
+        optimizer = SGD(learning_rate=0.1, l1_regularization=0.1)
+        weights = np.array([1.0, -1.0, 0.5])
+        gradient = np.array([0.0, 0.0, 0.0])  # Zero gradient
+        param_id = id(weights)
+
+        new_weights = optimizer.update(param_id, weights, gradient)
+
+        # Positive weights should decrease, negative should increase (toward zero)
+        assert new_weights[0] < weights[0]
+        assert new_weights[1] > weights[1]
+        assert new_weights[2] < weights[2]
+
+    def test_l1_l2_combined(self):
+        """Test combined L1 and L2 regularization."""
+        optimizer = SGD(learning_rate=0.1, weight_decay=0.1, l1_regularization=0.1)
+        weights = np.array([1.0, 2.0, 3.0])
+        gradient = np.array([0.0, 0.0, 0.0])
+        param_id = id(weights)
+
+        new_weights = optimizer.update(param_id, weights, gradient)
+
+        # All weights should decrease due to regularization
+        assert np.all(new_weights < weights)

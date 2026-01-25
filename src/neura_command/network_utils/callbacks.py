@@ -171,3 +171,222 @@ class HistoryCallback(Callback):
 
     def get_history(self) -> Dict[str, List[float]]:
         return self.history
+
+
+class CosineAnnealingScheduler(Callback):
+    """Cosine annealing learning rate scheduler.
+
+    Reduces learning rate following a cosine curve from initial_lr to min_lr
+    over T_max epochs, then optionally restarts.
+
+    Args:
+        optimizer: Optimizer whose learning rate will be adjusted
+        T_max: Number of epochs for one cosine cycle
+        min_lr: Minimum learning rate (default: 0)
+        warmup_epochs: Number of warmup epochs with linear increase (default: 0)
+
+    Reference:
+        Loshchilov & Hutter, 2016: "SGDR: Stochastic Gradient Descent with
+        Warm Restarts"
+
+    Example:
+        optimizer = Adam(learning_rate=0.001)
+        scheduler = CosineAnnealingScheduler(optimizer, T_max=50, min_lr=1e-6)
+        model.train(X, y, epochs=100, callbacks=[scheduler])
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        T_max: int,
+        min_lr: float = 0.0,
+        warmup_epochs: int = 0,
+    ):
+        self.optimizer = optimizer
+        self.T_max = T_max
+        self.min_lr = min_lr
+        self.warmup_epochs = warmup_epochs
+        self.initial_lr: float = optimizer.learning_rate
+        self.current_lr: float = self.initial_lr
+
+    def on_train_begin(self, logs: Optional[Dict[str, Any]] = None) -> None:
+        self.initial_lr = self.optimizer.learning_rate
+
+    def on_epoch_begin(self, epoch: int, logs: Optional[Dict[str, Any]] = None) -> None:
+        if epoch < self.warmup_epochs:
+            # Linear warmup
+            self.current_lr = self.initial_lr * (epoch + 1) / self.warmup_epochs
+        else:
+            # Cosine annealing
+            adjusted_epoch = epoch - self.warmup_epochs
+            adjusted_T_max = self.T_max - self.warmup_epochs
+            if adjusted_T_max > 0:
+                self.current_lr = self.min_lr + (self.initial_lr - self.min_lr) * (
+                    1 + np.cos(np.pi * adjusted_epoch / adjusted_T_max)
+                ) / 2
+            else:
+                self.current_lr = self.min_lr
+
+        self.optimizer.learning_rate = self.current_lr
+
+
+class ExponentialDecayScheduler(Callback):
+    """Exponential decay learning rate scheduler.
+
+    Reduces learning rate by a fixed factor at each epoch.
+
+    Args:
+        optimizer: Optimizer whose learning rate will be adjusted
+        decay_rate: Multiplicative decay factor applied each epoch (e.g., 0.95)
+        min_lr: Minimum learning rate (default: 1e-8)
+        decay_steps: Apply decay every N epochs (default: 1)
+
+    Example:
+        optimizer = SGD(learning_rate=0.1)
+        scheduler = ExponentialDecayScheduler(optimizer, decay_rate=0.95)
+        model.train(X, y, epochs=100, callbacks=[scheduler])
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        decay_rate: float = 0.95,
+        min_lr: float = 1e-8,
+        decay_steps: int = 1,
+    ):
+        self.optimizer = optimizer
+        self.decay_rate = decay_rate
+        self.min_lr = min_lr
+        self.decay_steps = decay_steps
+        self.initial_lr: float = optimizer.learning_rate
+        self.current_lr: float = self.initial_lr
+
+    def on_train_begin(self, logs: Optional[Dict[str, Any]] = None) -> None:
+        self.initial_lr = self.optimizer.learning_rate
+        self.current_lr = self.initial_lr
+
+    def on_epoch_begin(self, epoch: int, logs: Optional[Dict[str, Any]] = None) -> None:
+        if epoch > 0 and epoch % self.decay_steps == 0:
+            self.current_lr = max(
+                self.current_lr * self.decay_rate,
+                self.min_lr,
+            )
+            self.optimizer.learning_rate = self.current_lr
+
+
+class StepDecayScheduler(Callback):
+    """Step decay learning rate scheduler.
+
+    Reduces learning rate by a factor at specific epoch milestones.
+
+    Args:
+        optimizer: Optimizer whose learning rate will be adjusted
+        step_size: Number of epochs between each decay
+        gamma: Multiplicative factor for decay (default: 0.1)
+        min_lr: Minimum learning rate (default: 1e-8)
+
+    Example:
+        optimizer = SGD(learning_rate=0.1)
+        # Decay by factor of 0.1 every 30 epochs
+        scheduler = StepDecayScheduler(optimizer, step_size=30, gamma=0.1)
+        model.train(X, y, epochs=100, callbacks=[scheduler])
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        step_size: int,
+        gamma: float = 0.1,
+        min_lr: float = 1e-8,
+    ):
+        self.optimizer = optimizer
+        self.step_size = step_size
+        self.gamma = gamma
+        self.min_lr = min_lr
+        self.initial_lr: float = optimizer.learning_rate
+        self.current_lr: float = self.initial_lr
+
+    def on_train_begin(self, logs: Optional[Dict[str, Any]] = None) -> None:
+        self.initial_lr = self.optimizer.learning_rate
+        self.current_lr = self.initial_lr
+
+    def on_epoch_begin(self, epoch: int, logs: Optional[Dict[str, Any]] = None) -> None:
+        # Calculate the number of completed step_size intervals
+        num_decays = epoch // self.step_size
+        new_lr = self.initial_lr * (self.gamma**num_decays)
+        self.current_lr = max(new_lr, self.min_lr)
+        self.optimizer.learning_rate = self.current_lr
+
+
+class ReduceLROnPlateau(Callback):
+    """Reduce learning rate when a metric has stopped improving.
+
+    Args:
+        optimizer: Optimizer whose learning rate will be adjusted
+        monitor: Metric to monitor (default: 'val_loss')
+        factor: Factor by which to reduce learning rate (default: 0.1)
+        patience: Number of epochs with no improvement before reducing LR
+        min_lr: Minimum learning rate (default: 1e-8)
+        mode: 'min' or 'max'. In 'min' mode, LR is reduced when monitored
+              value stops decreasing; in 'max' mode when it stops increasing.
+        min_delta: Threshold for measuring improvement (default: 1e-4)
+
+    Example:
+        optimizer = Adam(learning_rate=0.001)
+        scheduler = ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+        model.train(X, y, epochs=100, callbacks=[scheduler], validation_data=(X_val, y_val))
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        monitor: str = "val_loss",
+        factor: float = 0.1,
+        patience: int = 10,
+        min_lr: float = 1e-8,
+        mode: str = "min",
+        min_delta: float = 1e-4,
+    ):
+        self.optimizer = optimizer
+        self.monitor = monitor
+        self.factor = factor
+        self.patience = patience
+        self.min_lr = min_lr
+        self.mode = mode
+        self.min_delta = min_delta
+
+        self.best: float = np.inf if mode == "min" else -np.inf
+        self.wait: int = 0
+        self.current_lr: float = optimizer.learning_rate
+
+    def on_train_begin(self, logs: Optional[Dict[str, Any]] = None) -> None:
+        self.best = np.inf if self.mode == "min" else -np.inf
+        self.wait = 0
+        self.current_lr = self.optimizer.learning_rate
+
+    def on_epoch_end(self, epoch: int, logs: Optional[Dict[str, Any]] = None) -> bool:
+        logs = logs or {}
+        current = logs.get(self.monitor)
+
+        if current is None:
+            return False
+
+        if self._is_improvement(current):
+            self.best = current
+            self.wait = 0
+        else:
+            self.wait += 1
+            if self.wait >= self.patience:
+                new_lr = max(self.current_lr * self.factor, self.min_lr)
+                if new_lr < self.current_lr:
+                    self.current_lr = new_lr
+                    self.optimizer.learning_rate = new_lr
+                self.wait = 0
+
+        return False
+
+    def _is_improvement(self, current: float) -> bool:
+        if self.mode == "min":
+            return current < self.best - self.min_delta
+        else:
+            return current > self.best + self.min_delta
