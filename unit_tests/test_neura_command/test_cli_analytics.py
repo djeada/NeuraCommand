@@ -14,6 +14,9 @@ from neura_command.layers import Dense, ReLU
 from neura_command.network.sequential import Sequential
 from neura_command.network_utils.optimizers import Adam
 from neura_command.network_utils.loss_functions import MSELoss
+from neura_command.serialization import load_model, get_model_info
+from app.commands.analyze_command import AnalyzeCommand
+from app.commands.visualize_command import VisualizeCommand, save_training_history
 
 
 class TestAnalyzeCommand:
@@ -59,8 +62,6 @@ class TestAnalyzeCommand:
 
     def test_analyze_architecture(self, model_with_data):
         """Test architecture analysis functionality."""
-        from app.commands.analyze_command import AnalyzeCommand
-        
         # Create mock args
         class MockArgs:
             model = model_with_data["model_path"]
@@ -72,8 +73,6 @@ class TestAnalyzeCommand:
         
         cmd = AnalyzeCommand(MockArgs())
         # We can't easily capture stdout, but we can test internal methods
-        from neura_command.serialization import load_model, get_model_info
-        
         model = load_model(model_with_data["model_path"])
         info = get_model_info(model_with_data["model_path"])
         
@@ -87,9 +86,6 @@ class TestAnalyzeCommand:
 
     def test_analyze_weights(self, model_with_data):
         """Test weight statistics analysis."""
-        from app.commands.analyze_command import AnalyzeCommand
-        from neura_command.serialization import load_model
-        
         class MockArgs:
             model = model_with_data["model_path"]
             features_csv = None
@@ -110,9 +106,6 @@ class TestAnalyzeCommand:
 
     def test_analyze_performance_regression(self, model_with_data):
         """Test regression performance analysis."""
-        from app.commands.analyze_command import AnalyzeCommand
-        from neura_command.serialization import load_model
-        
         class MockArgs:
             model = model_with_data["model_path"]
             features_csv = model_with_data["features_path"]
@@ -136,9 +129,6 @@ class TestAnalyzeCommand:
 
     def test_analyze_errors(self, model_with_data):
         """Test error analysis."""
-        from app.commands.analyze_command import AnalyzeCommand
-        from neura_command.serialization import load_model
-        
         class MockArgs:
             pass
         
@@ -157,8 +147,6 @@ class TestAnalyzeCommand:
 
     def test_regression_metrics_calculation(self):
         """Test regression metrics calculations."""
-        from app.commands.analyze_command import AnalyzeCommand
-        
         class MockArgs:
             pass
         
@@ -177,8 +165,6 @@ class TestAnalyzeCommand:
 
     def test_classification_metrics_calculation(self):
         """Test classification metrics calculations."""
-        from app.commands.analyze_command import AnalyzeCommand
-        
         class MockArgs:
             pass
         
@@ -195,8 +181,6 @@ class TestAnalyzeCommand:
 
     def test_confusion_matrix(self):
         """Test confusion matrix computation."""
-        from app.commands.analyze_command import AnalyzeCommand
-        
         class MockArgs:
             pass
         
@@ -243,8 +227,6 @@ class TestVisualizeCommand:
 
     def test_output_json_format(self, history_file, capsys):
         """Test JSON output format."""
-        from app.commands.visualize_command import VisualizeCommand
-        
         class MockArgs:
             history_json = history_file
             metric = "loss"
@@ -265,8 +247,6 @@ class TestVisualizeCommand:
 
     def test_output_table_format(self, history_file, capsys):
         """Test table output format."""
-        from app.commands.visualize_command import VisualizeCommand
-        
         class MockArgs:
             history_json = history_file
             metric = "loss"
@@ -285,8 +265,6 @@ class TestVisualizeCommand:
 
     def test_output_ascii_format(self, history_file, capsys):
         """Test ASCII chart output."""
-        from app.commands.visualize_command import VisualizeCommand
-        
         class MockArgs:
             history_json = history_file
             metric = "loss"
@@ -306,8 +284,6 @@ class TestVisualizeCommand:
 
     def test_save_training_history_util(self, tmp_path):
         """Test the save_training_history utility function."""
-        from app.commands.visualize_command import save_training_history
-        
         history = {
             "loss": [1.0, 0.5, 0.3],
             "val_loss": [1.1, 0.6, 0.4],

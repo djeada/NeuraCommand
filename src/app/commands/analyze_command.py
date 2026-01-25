@@ -13,6 +13,9 @@ import numpy as np
 
 from app.commands.base_command import BaseCommand
 
+# Small constant to prevent division by zero
+EPSILON = 1e-10
+
 
 class AnalyzeCommand(BaseCommand):
     """Analyze a neural network model with detailed metrics and diagnostics."""
@@ -248,10 +251,10 @@ class AnalyzeCommand(BaseCommand):
         # R² score
         ss_res = np.sum((y_true - y_pred) ** 2)
         ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-        r2 = float(1 - (ss_res / (ss_tot + 1e-10)))
+        r2 = float(1 - (ss_res / (ss_tot + EPSILON)))
 
         # Mean Absolute Percentage Error (MAPE)
-        non_zero_mask = np.abs(y_true) > 1e-10
+        non_zero_mask = np.abs(y_true) > EPSILON
         if np.any(non_zero_mask):
             mape = float(np.mean(np.abs((y_true[non_zero_mask] - y_pred[non_zero_mask]) / y_true[non_zero_mask])) * 100)
         else:
@@ -302,9 +305,9 @@ class AnalyzeCommand(BaseCommand):
                 fp = np.sum(confusion[:, i]) - tp
                 fn = np.sum(confusion[i, :]) - tp
 
-                precision = tp / (tp + fp + 1e-10)
-                recall = tp / (tp + fn + 1e-10)
-                f1 = 2 * precision * recall / (precision + recall + 1e-10)
+                precision = tp / (tp + fp + EPSILON)
+                recall = tp / (tp + fn + EPSILON)
+                f1 = 2 * precision * recall / (precision + recall + EPSILON)
 
                 class_metrics.append({
                     "class": int(c),

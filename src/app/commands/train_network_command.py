@@ -89,7 +89,7 @@ class TrainNetworkCommand(BaseCommand):
             return
 
         # Save training history if requested
-        if hasattr(self.args, 'save_history') and self.args.save_history:
+        if self.args.save_history:
             try:
                 # Handle both dict and None returns from train()
                 if history is None:
@@ -101,7 +101,7 @@ class TrainNetworkCommand(BaseCommand):
                 logging.warning(f"Could not save training history: {e}")
 
         # Show training summary if requested
-        if hasattr(self.args, 'show_summary') and self.args.show_summary:
+        if self.args.show_summary:
             self._display_training_summary(history)
 
         # Save the model
