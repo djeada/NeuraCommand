@@ -29,7 +29,6 @@ env/
 # Dependency management
 pip-log.txt
 pip-delete-this-directory.txt
-requirements.txt
 *.egg-info/
 dist/
 build/
