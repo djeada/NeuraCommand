@@ -101,7 +101,7 @@ class CommandHandler:
         args, remaining = self.parser.parse_known_args()
 
         # Handle legacy --action syntax
-        if args.legacy_action and not args.command:
+        if args.legacy_action and not getattr(args, 'command', None):
             args.command = args.legacy_action
             # Re-parse with the subcommand's arguments
             command_class = self.command_map.get(args.command)
@@ -120,17 +120,18 @@ class CommandHandler:
 
     def execute_command(self):
         """Execute the parsed command."""
-        if not hasattr(self.args, 'command') or not self.args.command:
+        command = getattr(self.args, 'command', None)
+        if not command:
             self.parser.print_help()
             print("\nError: Please specify a command.")
             print("Use 'neura_command <command> --help' for more information on a command.")
             sys.exit(1)
 
-        command_class = self.command_map.get(self.args.command)
+        command_class = self.command_map.get(command)
         if command_class:
             command_instance = command_class(self.args)
             command_instance.execute()
         else:
-            print(f"Error: Unknown command '{self.args.command}'")
+            print(f"Error: Unknown command '{command}'")
             self.parser.print_help()
             sys.exit(1)
