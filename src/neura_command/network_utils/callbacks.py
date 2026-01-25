@@ -156,10 +156,17 @@ class HistoryCallback(Callback):
     def on_epoch_end(self, epoch: int, logs: Optional[Dict[str, Any]] = None) -> bool:
         logs = logs or {}
         for key, value in logs.items():
-            if isinstance(value, (int, float)):
+            # Check for numeric types (including numpy scalars)
+            try:
+                float(value)
+                is_numeric = True
+            except (TypeError, ValueError):
+                is_numeric = False
+            
+            if is_numeric:
                 if key not in self.history:
                     self.history[key] = []
-                self.history[key].append(value)
+                self.history[key].append(float(value))
         return False
 
     def get_history(self) -> Dict[str, List[float]]:
