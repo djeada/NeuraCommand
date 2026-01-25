@@ -156,7 +156,6 @@ def plot_decision_boundary(
     model: Sequential,
     X: np.ndarray,
     y: np.ndarray,
-    scaler: StandardScaler,
     title: str = "Decision Boundary",
 ) -> None:
     """
@@ -166,7 +165,6 @@ def plot_decision_boundary(
         model: Trained Sequential model.
         X: Feature data (already scaled).
         y: Labels.
-        scaler: StandardScaler used for preprocessing.
         title: Plot title.
     """
     # Create a mesh grid
@@ -299,7 +297,6 @@ def main():
         model,
         X_combined,
         y_combined,
-        scaler,
         f"Non-Linear Decision Boundary (Accuracy: {accuracy * 100:.1f}%)",
     )
 

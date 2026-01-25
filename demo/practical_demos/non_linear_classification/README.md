@@ -4,8 +4,6 @@
 
 This tutorial demonstrates how to classify non-linearly separable datasets using neural networks with NeuraCommand. We use the `make_moons` dataset from scikit-learn, which generates two interleaving half circles that cannot be separated by a linear decision boundary.
 
-![Decision Boundary Example](https://scikit-learn.org/stable/_images/sphx_glr_plot_classifier_comparison_001.png)
-
 ## Problem Overview
 
 The moons dataset is a classic example of a non-linearly separable classification problem. It consists of two classes arranged in interleaving half-moon shapes. A simple linear classifier (like a perceptron) cannot accurately classify this data because no straight line can separate the two classes.
@@ -97,13 +95,18 @@ python main.py
 ```python
 from sklearn.datasets import make_moons
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 
 # Generate data
 X, y = make_moons(n_samples=500, noise=0.2, random_state=42)
 
+# Split into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
 # Standardize features (important for neural networks!)
 scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
 ```
 
 **Why standardize?** Neural networks train faster and more reliably when features have zero mean and unit variance.
