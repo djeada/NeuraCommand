@@ -7,6 +7,8 @@ from neura_command.deprecated.feed_forward_network.feed_forward_network_io impor
 
 
 class LoadPickleMenu(StepBasedMenu):
+    VALID_SUFFIXES = {".pkl", ".pickle"}
+
     def __init__(self, parent_menu: AbstractMenu):
         steps = [self.prompt_for_path, self.load_network_from_pickle]
         super().__init__(
@@ -25,9 +27,17 @@ class LoadPickleMenu(StepBasedMenu):
             return
 
         self.file_path = Path(path_input)
-        if not self.file_path.exists() or self.file_path.suffix.lower() != ".pickle":
+        if self.file_path.suffix == "":
+            default_path = self.file_path.with_suffix(".pkl")
+            if default_path.exists():
+                self.file_path = default_path
+
+        if (
+            not self.file_path.exists()
+            or self.file_path.suffix.lower() not in self.VALID_SUFFIXES
+        ):
             print(
-                "Invalid file path or file type. Please enter a valid .pickle file path."
+                "Invalid file path or file type. Please enter a valid .pkl or .pickle file path."
             )
             self.deactivate()
 

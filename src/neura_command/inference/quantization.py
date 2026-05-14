@@ -149,8 +149,9 @@ class QuantizedDense(QuantizedLayer):
 class QuantizedActivation(QuantizedLayer):
     """Quantized activation layer (no quantization needed, just the function)."""
 
-    def __init__(self, activation_type: str):
+    def __init__(self, activation_type: str, alpha: Optional[float] = None):
         self.activation_type = activation_type
+        self.alpha = alpha
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         if self.activation_type == "relu":
@@ -162,6 +163,12 @@ class QuantizedActivation(QuantizedLayer):
             return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
         elif self.activation_type == "tanh":
             return np.tanh(x)
+        elif self.activation_type == "leaky_relu":
+            alpha = 0.01 if self.alpha is None else self.alpha
+            return np.where(x > 0, x, alpha * x)
+        elif self.activation_type == "elu":
+            alpha = 1.0 if self.alpha is None else self.alpha
+            return np.where(x > 0, x, alpha * (np.exp(x) - 1))
         else:
             return x
 
@@ -280,10 +287,13 @@ def quantize_model(
             quantized_layers.append(QuantizedActivation("softmax"))
         elif isinstance(layer, Tanh):
             quantized_layers.append(QuantizedActivation("tanh"))
-        elif isinstance(layer, (LeakyReLU, ELU)):
-            # For LeakyReLU/ELU, fall back to generic handling
+        elif isinstance(layer, LeakyReLU):
             quantized_layers.append(
-                QuantizedActivation(layer.__class__.__name__.lower())
+                QuantizedActivation("leaky_relu", alpha=layer.activation.alpha)
+            )
+        elif isinstance(layer, ELU):
+            quantized_layers.append(
+                QuantizedActivation("elu", alpha=layer.activation.alpha)
             )
         else:
             raise ValueError(f"Cannot quantize layer type: {type(layer).__name__}")

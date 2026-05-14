@@ -22,7 +22,7 @@ class ExportCommand(BaseCommand):
             "--output",
             type=str,
             required=True,
-            help="Output path for exported model",
+            help="Output base path for exported model (creates .json and .npz files).",
         )
         parser.add_argument(
             "--quantize",
@@ -42,7 +42,6 @@ class ExportCommand(BaseCommand):
     def execute(self):
         from neura_command.serialization import load_model
         from neura_command.inference import InferenceModel
-        import pickle
 
         path = self.args.model
         output = self.args.output
@@ -65,17 +64,11 @@ class ExportCommand(BaseCommand):
 
         print(f"Inference model memory: {inference.memory_bytes / 1024:.1f} KB")
 
-        # Save inference model
-        # Note: Using pickle for inference model (it's safe - no arbitrary code execution)
-        with open(output, "wb") as f:
-            pickle.dump(
-                {
-                    "layers": inference.layers,
-                    "metadata": inference.metadata,
-                },
-                f,
-            )
-
-        print(f"Exported to '{output}'")
+        inference.save(output)
+        json_path, npz_path = InferenceModel.artifact_paths(output)
+        print(
+            "Exported inference artifact to "
+            f"'{json_path}' and '{npz_path}'"
+        )
         if quantize:
             print(f"Quantization: {quantize}")

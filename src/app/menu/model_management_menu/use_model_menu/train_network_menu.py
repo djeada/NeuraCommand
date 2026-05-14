@@ -37,12 +37,16 @@ class TrainNetworkMenu(StepBasedMenu):
             self.X_train, self.y_train = self.enter_data_manually()
 
     def set_training_parameters(self):
-        try:
-            self.epochs = int(input("Enter the number of epochs: "))
-            self.batch_size = int(input("Enter the batch size: "))
-        except ValueError:
-            print("Invalid input. Please enter integer values.")
-            self.set_training_parameters()
+        while True:
+            try:
+                self.epochs = int(input("Enter the number of epochs: "))
+                self.batch_size = int(input("Enter the batch size: "))
+                if self.epochs <= 0 or self.batch_size <= 0:
+                    print("Epochs and batch size must be positive integers.")
+                    continue
+                break
+            except ValueError:
+                print("Invalid input. Please enter integer values.")
 
     def execute_training(self):
         print("Training the network...")
@@ -64,6 +68,8 @@ class TrainNetworkMenu(StepBasedMenu):
         file_path = input("Enter the path of the training CSV file: ").strip()
         try:
             data = np.genfromtxt(file_path, delimiter=",")
+            if data.ndim == 1:
+                data = data.reshape(1, -1)
             if (
                 data.ndim < 2
                 or data.shape[1] < self.network.input_size + self.network.output_size
@@ -104,6 +110,10 @@ class TrainNetworkMenu(StepBasedMenu):
                 data_entries.append(row_data)
             except ValueError:
                 print("Invalid input. Ensure all values are numbers.")
+
+        if not data_entries:
+            print("No training data entered.")
+            return None, None
 
         data_array = np.array(data_entries)
         X_train = data_array[:, : self.network.input_size]

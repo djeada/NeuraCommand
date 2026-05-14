@@ -159,7 +159,8 @@ class PredictCommand(BaseCommand):
         except FileNotFoundError:
             pass
         except Exception as e:
-            self.logger.debug(f"Modern format load failed: {e}")
+            self._log_error(f"Error loading modern model: {e}")
+            return None
 
         # Try legacy pickle format
         if model_path.endswith('.pkl') or Path(model_path + '.pkl').exists():
@@ -205,7 +206,11 @@ class PredictCommand(BaseCommand):
                 predictions = []
                 for i in range(0, len(input_data), batch_size):
                     batch = input_data[i:i + batch_size]
-                    batch_pred = model.predict(batch)
+                    batch_pred = np.asarray(model.predict(batch))
+                    if batch_pred.ndim == 0:
+                        batch_pred = batch_pred.reshape(1, 1)
+                    elif batch_pred.ndim == 1:
+                        batch_pred = batch_pred.reshape(-1, 1)
                     predictions.append(batch_pred)
                     
                     if getattr(self.args, 'verbose', False):
@@ -213,7 +218,7 @@ class PredictCommand(BaseCommand):
                         print(f"  Processed {progress}/{len(input_data)} samples", 
                               file=sys.stderr)
 
-                predictions = np.vstack(predictions)
+                predictions = np.concatenate(predictions, axis=0)
             else:
                 predictions = model.predict(input_data)
 

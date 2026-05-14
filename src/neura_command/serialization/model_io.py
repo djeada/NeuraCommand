@@ -9,6 +9,7 @@ No pickle is used - this format is safe to load from untrusted sources.
 """
 
 import json
+import inspect
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, List
@@ -135,7 +136,10 @@ def _deserialize_layer(config: Dict[str, Any]) -> Any:
             "LinearActivation": LinearActivation(),
             None: None,
         }
-        activation = activation_map.get(config.get("activation"))
+        activation_name = config.get("activation")
+        if activation_name not in activation_map:
+            raise ValueError(f"Unknown Dense activation: {activation_name}")
+        activation = activation_map[activation_name]
         return layer_class(
             in_features=config["in_features"],
             out_features=config["out_features"],
@@ -168,9 +172,21 @@ def _deserialize_layer(config: Dict[str, Any]) -> Any:
             "ELUActivation": "elu",
             "LinearActivation": "linear",
         }
-        return layer_class(name_map.get(activation_name, "relu"))
+        if activation_name not in name_map:
+            raise ValueError(f"Unknown Activation layer function: {activation_name}")
+        return layer_class(name_map[activation_name])
     else:
         raise ValueError(f"Don't know how to deserialize: {class_name}")
+
+
+def _filter_constructor_kwargs(factory, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Filter config keys to only those accepted by the target constructor."""
+    signature = inspect.signature(factory)
+    return {
+        key: value
+        for key, value in config.items()
+        if key in signature.parameters
+    }
 
 
 def _serialize_optimizer(optimizer) -> Dict[str, Any]:
@@ -233,7 +249,7 @@ def _deserialize_optimizer(config: Dict[str, Any]):
     if class_name not in optimizer_map:
         raise ValueError(f"Unknown optimizer: {class_name}")
 
-    return optimizer_map[class_name](**config)
+    return optimizer_map[class_name](**_filter_constructor_kwargs(optimizer_map[class_name], config))
 
 
 def _serialize_loss(loss) -> Dict[str, Any]:
@@ -272,7 +288,7 @@ def _deserialize_loss(config: Dict[str, Any]):
     if class_name not in loss_map:
         raise ValueError(f"Unknown loss function: {class_name}")
 
-    return loss_map[class_name](**config)
+    return loss_map[class_name](**_filter_constructor_kwargs(loss_map[class_name], config))
 
 
 def save_model(

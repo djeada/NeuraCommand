@@ -1,6 +1,7 @@
 import json
 from typing import List, Union, Dict
 
+from neura_command.deprecated import warn_deprecated
 from neura_command.deprecated.layer.layer import Layer
 from neura_command.deprecated.feed_forward_network.feed_forward_network import (
     FeedForwardNetwork,
@@ -24,6 +25,7 @@ from neura_command.network_utils.loss_functions import (
 
 class NetworkBuilder:
     def __init__(self, json_config: Union[str, Dict] = None) -> None:
+        warn_deprecated()
         if isinstance(json_config, str):
             self.config = json.loads(json_config)
         elif isinstance(json_config, dict):
@@ -38,7 +40,11 @@ class NetworkBuilder:
         for layer_conf in self.config.get("layers", []):
             perceptrons = self._build_perceptrons(layer_conf.get("perceptrons", []))
             layers.append(Layer(perceptrons))
-        loss_func = self.config.get("loss_func", MSELoss())
+        loss_config = self.config.get("loss_func", "mse")
+        if isinstance(loss_config, str):
+            loss_func = self._get_loss_function(loss_config)
+        else:
+            loss_func = loss_config if loss_config is not None else MSELoss()
         return FeedForwardNetwork(loss_func=loss_func, layers=layers)
 
     def _build_perceptrons(self, perceptrons_config: List[Dict]) -> List[Perceptron]:
@@ -171,9 +177,8 @@ class NetworkBuilder:
         return json.dumps(self.config, indent=4)
 
     @classmethod
-    def from_json(cls, json_config: str) -> "NetworkBuilder":
-        config = json.loads(json_config)
-        return NetworkBuilder(json_config=config)
+    def from_json(cls, json_config: Union[str, Dict]) -> "NetworkBuilder":
+        return cls(json_config=json_config)
 
 
 if __name__ == "__main__":

@@ -22,104 +22,111 @@ NeuraCommand is a Python package and CLI tool designed for streamlined creation,
 
 ## Installation
 
-*Note*: It's important to run these commands in the root directory of the repository for the installation to work correctly.
-
-To install NeuraCommand, open your terminal or command prompt and run the following command:
+Install the published package with:
 
 ```shell
 pip install neura_command
 ```
 
-After installing, you can verify the installation and check the installed version of NeuraCommand by running:
+After installing, verify the CLI with either:
 
 ```shell
 neura_command --version
+python -m neura_command --version
 ```
 
-This command should return the version number of NeuraCommand, indicating that it has been installed successfully.
+When running from a local checkout, use:
+
+```shell
+python -m neura_command --help
+```
 
 ## Usage of NeuraCommand CLI
 
-The NeuraCommand CLI offers several actions: `create`, `train`, `predict`, `info`, `export`, `analyze`, and `visualize`. Each action is equipped with specific options to tailor its functionality.
+The NeuraCommand CLI provides the commands `create`, `train`, `predict`, `info`, `export`, `analyze`, and `visualize`.
 
+```shell
+neura_command <command> [options]
 ```
-python main.py --action {create,train,predict,info,export,analyze,visualize}
-```
 
-Options:
-
-- `-h`, `--help`: Show the help message and exit.
-- `--action {create,train,predict,info,export,analyze,visualize}`: Choose the action to perform.
+Legacy `--action` syntax is still accepted for backward compatibility, but the subcommand form above is the primary interface.
 
 ### Create
 
-Use the `create` action to create a new neural network. You need to provide a JSON file describing the network architecture and specify the output path for the created model.
+Use `create` to build a model from a JSON architecture file. The default modern format writes two files: `<output>.json` and `<output>.npz`.
 
-```
-python main.py --action create --network-architecture-json path/to/architecture.json --model-pkl path/to/output_model.pkl
+```shell
+neura_command create --architecture path/to/architecture.json --output path/to/model
 ```
 
 Options:
 
-- `--network-architecture-json`: Path to the JSON file that describes the neural network's architecture. This file should detail the layers, nodes, activation functions, etc.
-- `--model-pkl`: [Optional] Destination path for saving the serialized neural network model (.pkl format). Defaults to 'network.pkl' if not specified.
+- `--architecture`: Path to the JSON file describing the neural network architecture.
+- `--output`: [Optional] Base path for the saved model. Defaults to `model`.
+- `--format`: Choose `modern` (safe JSON + NPZ, recommended) or `legacy` (pickle, for backward compatibility only).
 
 ### Train
-Use the `train` action to train an existing network. You must provide the path to the network's `.pkl` file, input features, target values, number of epochs, and output model path (if not overwriting).
+Use `train` to train an existing model. Modern models use the same extensionless base path created by `create`.
 
 Example:
 
-```
-python main.py --action train --model-pkl path/to/network.pkl --features-csv path/to/features.csv --targets-csv path/to/targets.csv --epochs 100 --output-model-pkl path/to/output_model.pkl
+```shell
+neura_command train --model path/to/model --features-csv path/to/features.csv --targets-csv path/to/targets.csv --epochs 100 --output path/to/trained_model
 ```
 
 Options:
 
-- `--model-pkl`: Path to the neural network file (.pkl) to be trained.
+- `--model`: Path to the model (base path for modern format, or `.pkl` for legacy models).
 - `--features-csv`: Path to the CSV file containing the input features for the training.
 - `--targets-csv`: Path to the CSV file containing the target values for the training.
 - `--epochs`: [Optional] Number of training epochs. Defaults to 100.
-- `--overwrite`: [Optional] Flag to indicate if the existing .pkl file should be overwritten after training.
-- `--output-model-pkl`: [Optional] Custom path to save the trained network model file (.pkl). Required if --overwrite is not set.
+- `--overwrite`: [Optional] Overwrite the input model.
+- `--output`: [Optional] Custom base path for the trained model.
 - `--save-history`: [Optional] Path to save training history as JSON file for later visualization.
 - `--show-summary`: [Optional] Display training summary after training completes.
 
 ### Predict
-Use the predict action to make predictions using a trained model. You need to provide the model `.pkl` file and input data. Additionally, specify how you want to output the predictions.
+Use `predict` to make predictions with a trained model.
 
 Example:
 
-```
-python main.py --action predict --model-pkl path/to/model.pkl --input-csv path/to/input.csv --output-mode display
+```shell
+neura_command predict --model path/to/model --input-csv path/to/input.csv --output-mode display
 ```
 
 To save predictions to a CSV file:
 
-```
-python main.py --action predict --model-pkl path/to/model.pkl --input-csv path/to/input.csv --output-mode save --output-csv path/to/output.csv
+```shell
+neura_command predict --model path/to/model --input-csv path/to/input.csv --output-mode save --output-csv path/to/output.csv
 ```
 
 Options:
 
-- `--model-pkl`: Path to the neural network file (.pkl) used for making predictions.
+- `--model`: Path to the model (base path for modern format, or `.pkl` for legacy models).
 - `--input-csv`: Path to the input CSV file. The format of this file should match the input requirements of the model.
 - `--output-mode`: Choose 'display' to show predictions on stdout or 'save' to save them to a CSV file.
 - `--output-csv`: [Required if output-mode is 'save'] Path to save the prediction results as a CSV file.
+
+### Export
+
+Use `export` to save an inference-only artifact for deployment. Exported inference artifacts are stored safely as `<output>.json` and `<output>.npz`.
+
+```shell
+neura_command export --model path/to/model --output path/to/inference_model --quantize float16
+```
 
 ### Analyze
 
 Use the `analyze` action to perform detailed network analytics and diagnostics. This includes architecture analysis, weight statistics, performance metrics, and error analysis.
 
-Example:
-
-```
-python main.py --action analyze --model path/to/model
+```shell
+neura_command analyze --model path/to/model
 ```
 
 To analyze with test data:
 
-```
-python main.py --action analyze --model path/to/model --features-csv path/to/features.csv --targets-csv path/to/targets.csv
+```shell
+neura_command analyze --model path/to/model --features-csv path/to/features.csv --targets-csv path/to/targets.csv
 ```
 
 Options:
@@ -141,10 +148,8 @@ The analyze command provides:
 
 Use the `visualize` action to visualize training progress with ASCII charts in the terminal.
 
-Example:
-
-```
-python main.py --action visualize --history-json path/to/training_history.json
+```shell
+neura_command visualize --history-json path/to/training_history.json
 ```
 
 Options:
@@ -168,17 +173,17 @@ Example code for using NeuraCommand in Python:
 ```python
 import numpy as np
 
-from neura_command.network.network_builder.string_network_builder import (
-    StringNetworkBuilder,
+from neura_command import Sequential, Dense, ReLU, Adam, MSELoss
+
+model = Sequential(
+    layers=[
+        Dense(3, 5),
+        ReLU(),
+        Dense(5, 3),
+    ],
+    optimizer=Adam(learning_rate=0.001),
+    loss=MSELoss(),
 )
-
-# Example usage
-builder = StringNetworkBuilder()
-builder.add_layer(3, 5, "relu")  # First hidden layer
-builder.add_layer(5, 3, "relu")  # Second hidden layer (output layer)
-
-# Initialize the network using the builder
-net = builder.build()
 
 # Prepare the dataset for training
 data_samples = [([0.1, 0.2, 0.3], [0, 1, 0])]  # Example: [(input_data, target_data)]
@@ -186,17 +191,18 @@ X = np.array([sample[0] for sample in data_samples])
 Y = np.array([sample[1] for sample in data_samples])
 
 # Train the network
-net.train(X, Y, epochs=10, batch_size=1)
+model.train(X, Y, epochs=10, batch_size=1)
 
 # Make predictions
 test_input = np.array([[0.1, 0.2, 0.3]])
-predicted_output = net.predict(test_input)
+predicted_output = model.predict(test_input)
 print(f"Predicted Output: {predicted_output}")
 
-# Using the evaluate function
-predicted_outputs = net.predict(X)
+# Evaluate and save
+predicted_outputs = model.predict(X)
 mse = np.mean((predicted_outputs - Y) ** 2)
 print(f"Mean Squared Error: {mse}%")
+model.save("models/example_model")
 ```
 
 ## References

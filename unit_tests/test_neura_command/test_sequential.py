@@ -126,6 +126,44 @@ class TestSequentialTraining:
         assert "val_loss" in history
         assert len(history["loss"]) == 5
 
+    def test_evaluate_uses_sample_weighting(self):
+        model = Sequential(
+            layers=[Dense(1, 1, use_bias=False)],
+            optimizer=SGD(learning_rate=0.0),
+            loss=MSELoss(),
+        )
+        model.layers[0].weights[...] = 0.0
+
+        X = np.zeros((3, 1))
+        y = np.array([[1.0], [1.0], [10.0]])
+
+        loss = model.evaluate(X, y, batch_size=2)["loss"]
+
+        assert np.isclose(loss, 34.0)
+
+    def test_train_history_uses_sample_weighting(self):
+        model = Sequential(
+            layers=[Dense(1, 1, use_bias=False)],
+            optimizer=SGD(learning_rate=0.0),
+            loss=MSELoss(),
+        )
+        model.layers[0].weights[...] = 0.0
+
+        X = np.zeros((3, 1))
+        y = np.array([[1.0], [1.0], [10.0]])
+
+        history = model.train(
+            X,
+            y,
+            epochs=1,
+            batch_size=2,
+            validation_data=(X, y),
+            verbose=False,
+        )
+
+        assert np.isclose(history["loss"][0], 34.0)
+        assert np.isclose(history["val_loss"][0], 34.0)
+
     def test_train_with_early_stopping(self):
         np.random.seed(42)
         model = Sequential(

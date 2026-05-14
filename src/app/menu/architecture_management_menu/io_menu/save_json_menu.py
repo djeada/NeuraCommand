@@ -35,9 +35,8 @@ class SaveNetworkMenu(StepBasedMenu):
 
     def save_network_configuration(self):
         try:
-            with self.file_path.open("w") as file:
-                # Directly save the dictionary as JSON
-                json.dump(self.network_builder.to_json(), file, indent=4)
+            with self.file_path.open("w", encoding="utf-8") as file:
+                json.dump(self.network_builder.config, file, indent=4)
             print(f"Network configuration saved successfully to {self.file_path}")
             self.deactivate()  # Deactivate after saving
         except Exception as e:

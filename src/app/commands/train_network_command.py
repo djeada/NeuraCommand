@@ -123,6 +123,10 @@ class TrainNetworkCommand(BaseCommand):
         # Configure logging
         self._configure_logging()
 
+        if not self._has_output_destination():
+            self._log_error("Output path not specified. Use --output or --overwrite.")
+            sys.exit(1)
+
         # Load the model
         model = self._load_model()
         if model is None:
@@ -142,14 +146,19 @@ class TrainNetworkCommand(BaseCommand):
             sys.exit(1)
 
         # Prepare validation data if requested
-        val_features, val_targets = self._split_validation_data(features, targets)
+        (
+            train_features,
+            train_targets,
+            val_features,
+            val_targets,
+        ) = self._split_validation_data(features, targets)
 
         # Set up callbacks
         callbacks = self._setup_callbacks()
 
         # Train the model
         history = self._train_model(
-            model, features, targets, val_features, val_targets, callbacks
+            model, train_features, train_targets, val_features, val_targets, callbacks
         )
 
         # Save training history if requested
@@ -201,7 +210,8 @@ class TrainNetworkCommand(BaseCommand):
         except FileNotFoundError:
             pass
         except Exception as e:
-            self.logger.debug(f"Modern format load failed: {e}")
+            self._log_error(f"Error loading modern model: {e}")
+            return None
 
         # Try legacy pickle format
         if model_path.endswith('.pkl') or Path(model_path + '.pkl').exists():
@@ -274,7 +284,7 @@ class TrainNetworkCommand(BaseCommand):
         val_split = self.args.validation_split
 
         if val_split <= 0:
-            return None, None
+            return features, targets, None, None
 
         if val_split >= 0.5:
             self._log_error("Validation split must be less than 0.5")
@@ -285,7 +295,7 @@ class TrainNetworkCommand(BaseCommand):
 
         if n_val == 0:
             self._log_info("Validation split too small, skipping validation")
-            return None, None
+            return features, targets, None, None
 
         # Shuffle indices
         indices = np.random.permutation(n_samples)
@@ -294,10 +304,16 @@ class TrainNetworkCommand(BaseCommand):
 
         val_features = features[val_indices]
         val_targets = targets[val_indices]
+        train_features = features[train_indices]
+        train_targets = targets[train_indices]
 
         self._log_info(f"Using {n_val} samples for validation, {len(train_indices)} for training")
 
-        return val_features, val_targets
+        return train_features, train_targets, val_features, val_targets
+
+    def _has_output_destination(self) -> bool:
+        """Whether training has a valid destination for the trained model."""
+        return bool(self.args.output or self.args.overwrite)
 
     def _setup_callbacks(self):
         """Set up training callbacks."""
@@ -343,11 +359,17 @@ class TrainNetworkCommand(BaseCommand):
             if val_features is not None:
                 import inspect
                 train_sig = inspect.signature(model.train)
-                if 'X_val' in train_sig.parameters:
-                    if val_features.ndim == 1:
-                        val_features = val_features.reshape(-1, 1)
-                    if val_targets.ndim == 1:
-                        val_targets = val_targets.reshape(-1, 1)
+                accepts_kwargs = any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in train_sig.parameters.values()
+                )
+                if val_features.ndim == 1:
+                    val_features = val_features.reshape(-1, 1)
+                if val_targets.ndim == 1:
+                    val_targets = val_targets.reshape(-1, 1)
+                if 'validation_data' in train_sig.parameters or accepts_kwargs:
+                    train_kwargs['validation_data'] = (val_features, val_targets)
+                elif 'X_val' in train_sig.parameters:
                     train_kwargs['X_val'] = val_features
                     train_kwargs['y_val'] = val_targets
 

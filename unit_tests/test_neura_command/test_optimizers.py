@@ -12,6 +12,20 @@ from neura_command.network_utils.optimizers import (
 )
 
 
+class DummyLayer:
+    def __init__(self):
+        self.weight = np.array([1.0, 2.0], dtype=np.float64)
+        self.bias = np.array([0.5], dtype=np.float64)
+        self.weight_grad = np.array([0.1, 0.2], dtype=np.float64)
+        self.bias_grad = np.array([0.05], dtype=np.float64)
+
+    def parameters(self):
+        return [self.weight, self.bias]
+
+    def gradients(self):
+        return [self.weight_grad, self.bias_grad]
+
+
 class TestSGD:
     def test_basic_update(self):
         optimizer = SGD(learning_rate=0.1)
@@ -58,12 +72,11 @@ class TestAdam:
         gradient = np.array([0.1, 0.2, 0.3])
         param_id = id(weights)
 
-        # Manually increment timestep for single update test
-        optimizer._t = 1
         new_weights = optimizer.update(param_id, weights, gradient)
 
         # Weights should change
         assert not np.array_equal(new_weights, weights)
+        assert optimizer._t == 1
 
     def test_multiple_updates(self):
         optimizer = Adam(learning_rate=0.001)
@@ -71,11 +84,11 @@ class TestAdam:
         gradient = np.array([0.1, 0.2, 0.3])
         param_id = id(weights)
 
-        for i in range(10):
-            optimizer._t = i + 1  # Simulate step() incrementing
+        for _ in range(10):
             weights = optimizer.update(param_id, weights, gradient)
 
         assert len(optimizer._m) == 1
+        assert optimizer._t == 10
 
     def test_reset(self):
         optimizer = Adam(learning_rate=0.001)
@@ -83,7 +96,6 @@ class TestAdam:
         gradient = np.array([0.1, 0.2, 0.3])
         param_id = id(weights)
 
-        optimizer._t = 1
         optimizer.update(param_id, weights, gradient)
         assert len(optimizer._m) > 0
         assert len(optimizer._v) > 0
@@ -102,12 +114,21 @@ class TestAdam:
         # Different gradients for different parameters
         gradient1 = np.array([1.0, 0.01])  # First param has larger gradient
 
-        optimizer._t = 1
         weights = optimizer.update(param_id, weights, gradient1)
 
         # Both should be updated, but proportionally different
         assert weights[0] != 1.0
         assert weights[1] != 1.0
+
+    def test_step_increments_t_once_for_multiple_parameters(self):
+        optimizer = Adam(learning_rate=0.001)
+        layer = DummyLayer()
+
+        optimizer.step([layer])
+
+        assert optimizer._t == 1
+        assert len(optimizer._m) == 2
+        assert len(optimizer._v) == 2
 
 
 class TestRMSprop:
@@ -220,9 +241,9 @@ class TestNadam:
         gradient = np.array([0.1, 0.2, 0.3])
         param_id = id(weights)
 
-        optimizer._t = 1
         new_weights = optimizer.update(param_id, weights, gradient)
         assert not np.array_equal(new_weights, weights)
+        assert optimizer._t == 1
 
     def test_multiple_updates(self):
         optimizer = Nadam(learning_rate=0.001)
@@ -230,12 +251,12 @@ class TestNadam:
         gradient = np.array([0.1, 0.2, 0.3])
         param_id = id(weights)
 
-        for i in range(10):
-            optimizer._t = i + 1
+        for _ in range(10):
             weights = optimizer.update(param_id, weights, gradient)
 
         assert len(optimizer._m) == 1
         assert len(optimizer._v) == 1
+        assert optimizer._t == 10
 
     def test_reset(self):
         optimizer = Nadam(learning_rate=0.001)
@@ -243,7 +264,6 @@ class TestNadam:
         gradient = np.array([0.1, 0.2, 0.3])
         param_id = id(weights)
 
-        optimizer._t = 1
         optimizer.update(param_id, weights, gradient)
         assert len(optimizer._m) > 0
         assert len(optimizer._v) > 0
@@ -252,6 +272,16 @@ class TestNadam:
         assert len(optimizer._m) == 0
         assert len(optimizer._v) == 0
         assert optimizer._t == 0
+
+    def test_step_increments_t_once_for_multiple_parameters(self):
+        optimizer = Nadam(learning_rate=0.001)
+        layer = DummyLayer()
+
+        optimizer.step([layer])
+
+        assert optimizer._t == 1
+        assert len(optimizer._m) == 2
+        assert len(optimizer._v) == 2
 
 
 class TestSGDL1Regularization:

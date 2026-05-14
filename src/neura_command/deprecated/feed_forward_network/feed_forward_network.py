@@ -1,6 +1,7 @@
 import numpy as np
 from typing import List, Optional, Callable
 
+from neura_command.deprecated import warn_deprecated
 from neura_command.deprecated.layer.layer import Layer
 from neura_command.network_utils.loss_functions import LossFunction
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class FeedForwardNetwork:
     def __init__(self, loss_func: LossFunction, layers=None) -> None:
+        warn_deprecated()
         self.layers: List[Layer] = layers if layers is not None else list()
         self.loss_func: LossFunction = loss_func
         logger.info(

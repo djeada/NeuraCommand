@@ -8,12 +8,14 @@ and both new command syntax and legacy --action syntax.
 import sys
 import tempfile
 import os
+import runpy
 from io import StringIO
 from unittest.mock import patch
 
 import pytest
 
 from app.commands.command_handler import CommandHandler
+from neura_command.cli import main as cli_main
 
 
 class TestCommandHandlerHelp:
@@ -288,3 +290,22 @@ class TestNewCLIFeatures:
         ]):
             handler = CommandHandler()
             assert handler.args.architecture == str(arch_file)
+
+
+class TestConsoleEntrypoints:
+    def test_cli_entrypoint_uses_supplied_argv(self, capsys):
+        with pytest.raises(SystemExit) as exc_info:
+            cli_main(["--help"])
+        assert exc_info.value.code == 0
+
+        captured = capsys.readouterr()
+        assert "commands" in captured.out
+
+    def test_module_entrypoint_runs(self, capsys):
+        with patch.object(sys, "argv", ["neura_command", "--version"]):
+            with pytest.raises(SystemExit) as exc_info:
+                runpy.run_module("neura_command.__main__", run_name="__main__")
+            assert exc_info.value.code == 0
+
+        captured = capsys.readouterr()
+        assert "neura_command" in captured.out

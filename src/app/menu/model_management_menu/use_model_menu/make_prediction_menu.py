@@ -40,7 +40,8 @@ class MakePredictionMenu(StepBasedMenu):
             self.data = self.load_data_from_csv(file_path)
         elif self.method == "manual":
             data_input = input("Enter your data (comma-separated): ").strip()
-            self.data = np.array([float(x) for x in data_input.split(",")])
+            values = np.array([float(x) for x in data_input.split(",")], dtype=float)
+            self.data = values.reshape(1, -1)
 
     def make_prediction(self):
         if self.data is not None:
@@ -63,6 +64,19 @@ class MakePredictionMenu(StepBasedMenu):
     def load_data_from_csv(self, file_path):
         try:
             data = np.genfromtxt(file_path, delimiter=",")
+            if data.ndim == 1:
+                if data.size == self.model.input_size:
+                    data = data.reshape(1, -1)
+                elif data.size % self.model.input_size == 0:
+                    data = data.reshape(-1, self.model.input_size)
+                else:
+                    raise ValueError(
+                        f"Expected rows with {self.model.input_size} input values, got {data.size} values."
+                    )
+            elif data.shape[1] != self.model.input_size:
+                raise ValueError(
+                    f"Expected {self.model.input_size} input columns, got {data.shape[1]}."
+                )
             print(f"Data loaded successfully from {file_path}")
             return data
         except Exception as e:

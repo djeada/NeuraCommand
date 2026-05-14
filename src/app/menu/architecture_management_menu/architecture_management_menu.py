@@ -26,9 +26,10 @@ class ArchitectureManagementMenu(ChoiceBasedMenu):
                 },
             },
         )
-        self.builder = NetworkBuilder()
+        self.builder = None
 
     def create_new_architecture(self):
+        self.builder = NetworkBuilder()
         sub_menu = ModifyArchitectureMenu(
             parent_menu=self.parent_menu, network_builder=self.builder
         )

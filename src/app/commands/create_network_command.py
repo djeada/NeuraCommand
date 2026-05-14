@@ -24,6 +24,7 @@ class CreateNetworkCommand(BaseCommand):
         "tanh": "Tanh",
         "softmax": "Softmax",
         "leaky_relu": "LeakyReLU",
+        "leakyrelu": "LeakyReLU",
         "elu": "ELU",
         "linear": None,
     }
@@ -32,7 +33,7 @@ class CreateNetworkCommand(BaseCommand):
     OPTIMIZER_CLASSES = ["SGD", "Adam", "RMSprop", "AdaGrad"]
 
     # Supported loss functions
-    LOSS_CLASSES = ["MSELoss", "CrossEntropyLoss", "HuberLoss"]
+    LOSS_CLASSES = ["MSELoss", "CrossEntropyLoss", "HuberLoss", "DifferenceLoss"]
 
     @staticmethod
     def add_arguments(parser):
@@ -309,7 +310,16 @@ class CreateNetworkCommand(BaseCommand):
             in_features = config.get("in_features") or config.get("input_size")
             out_features = config.get("out_features") or config.get("output_size")
             use_bias = config.get("use_bias", True)
-            return Dense(in_features, out_features, use_bias=use_bias)
+            activation = self._create_dense_activation(
+                config.get("activation"),
+                alpha=config.get("alpha"),
+            )
+            return Dense(
+                in_features,
+                out_features,
+                activation=activation,
+                use_bias=use_bias,
+            )
 
         elif layer_type == "dropout":
             rate = config.get("rate", 0.5)
@@ -334,7 +344,7 @@ class CreateNetworkCommand(BaseCommand):
         elif layer_type == "softmax":
             return Softmax()
 
-        elif layer_type == "leakyrelu":
+        elif layer_type in ("leakyrelu", "leaky_relu"):
             alpha = config.get("alpha", 0.01)
             return LeakyReLU(alpha)
 
@@ -362,6 +372,48 @@ class CreateNetworkCommand(BaseCommand):
         else:
             self._log_error(f"Unknown layer type: {layer_type}")
             return None
+
+    def _create_dense_activation(
+        self,
+        activation_name: Optional[str],
+        alpha: Optional[float] = None,
+    ):
+        """Create an activation function instance for Dense layers."""
+        if not activation_name:
+            return None
+
+        from neura_command.network_utils.activation_functions import (
+            ELUActivation,
+            LeakyReLUActivation,
+            LinearActivation,
+            ReLUActivation,
+            SigmoidActivation,
+            SoftmaxActivation,
+            TanhActivation,
+        )
+
+        activation_key = activation_name.lower()
+        activation_map = {
+            "relu": ReLUActivation,
+            "sigmoid": SigmoidActivation,
+            "tanh": TanhActivation,
+            "softmax": SoftmaxActivation,
+            "linear": LinearActivation,
+            "leaky_relu": LeakyReLUActivation,
+            "leakyrelu": LeakyReLUActivation,
+            "elu": ELUActivation,
+        }
+
+        if activation_key not in activation_map:
+            self._log_error(f"Unknown dense activation: {activation_name}")
+            return None
+
+        activation_class = activation_map[activation_key]
+        if activation_key in ("leaky_relu", "leakyrelu", "elu"):
+            if alpha is None:
+                alpha = 0.01 if "leaky" in activation_key else 1.0
+            return activation_class(alpha)
+        return activation_class()
 
     def _create_optimizer(self, config: Dict[str, Any]):
         """Create optimizer from configuration."""
@@ -399,6 +451,7 @@ class CreateNetworkCommand(BaseCommand):
     def _create_loss(self, config: Dict[str, Any]):
         """Create loss function from configuration."""
         from neura_command import MSELoss, CrossEntropyLoss, HuberLoss
+        from neura_command.network_utils.loss_functions import DifferenceLoss
 
         if isinstance(config, str):
             config = {"class": config}
@@ -411,6 +464,8 @@ class CreateNetworkCommand(BaseCommand):
             return CrossEntropyLoss()
         elif loss_class == "HuberLoss":
             return HuberLoss(delta=config.get("delta", 1.0))
+        elif loss_class == "DifferenceLoss":
+            return DifferenceLoss()
         else:
             self._log_info(f"Unknown loss '{loss_class}', using MSELoss")
             return MSELoss()
@@ -428,6 +483,8 @@ class CreateNetworkCommand(BaseCommand):
 
             network_builder = NetworkBuilder.from_json(json_config=arch)
             model = network_builder.build()
+            if not output_path.endswith(".pkl"):
+                output_path += ".pkl"
 
             FeedForwardNetworkIO.save_to_pickle(model, output_path)
             self._log_info(f"Model saved to {output_path}")

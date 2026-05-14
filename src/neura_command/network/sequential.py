@@ -174,6 +174,38 @@ class Sequential:
         """Compute gradient of loss w.r.t. predictions."""
         return self.loss.derivative(y_true, y_pred)
 
+    @staticmethod
+    def _loss_to_float(loss_value: Any) -> float:
+        """Convert backend scalar loss to a Python float."""
+        if hasattr(loss_value, "get"):
+            return float(to_numpy(loss_value))
+        return float(loss_value)
+
+    def _average_loss(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        batch_size: int,
+    ) -> float:
+        """Compute sample-weighted average loss over a dataset."""
+        was_training = self._training
+        self.eval_mode()
+
+        n_samples = len(X)
+        total_loss = 0.0
+
+        for i in range(0, n_samples, batch_size):
+            X_batch = X[i : i + batch_size]
+            y_batch = y[i : i + batch_size]
+            y_pred = self.predict(X_batch)
+            batch_loss = self._loss_to_float(self.compute_loss(y_batch, y_pred))
+            total_loss += batch_loss * len(X_batch)
+
+        if was_training:
+            self.train_mode()
+
+        return total_loss / n_samples
+
     def train(
         self,
         X: np.ndarray,
@@ -245,11 +277,7 @@ class Sequential:
 
                 # Compute loss
                 batch_loss = self.compute_loss(y_batch_device, y_pred)
-                epoch_loss += (
-                    float(to_numpy(batch_loss))
-                    if hasattr(batch_loss, "get")
-                    else float(batch_loss)
-                )
+                epoch_loss += self._loss_to_float(batch_loss) * len(X_batch)
 
                 # Backward pass
                 grad = self.compute_loss_gradient(y_batch_device, y_pred)
@@ -258,15 +286,14 @@ class Sequential:
                 # Update weights
                 self.optimizer.step(self.layers)
 
-            epoch_loss /= n_batches
+            epoch_loss /= n_samples
 
             # Compute validation loss
             logs = {"loss": epoch_loss, "epoch": epoch}
 
             if validation_data is not None:
                 X_val, y_val = validation_data
-                val_pred = self.predict(X_val)
-                val_loss = self.compute_loss(y_val, val_pred)
+                val_loss = self._average_loss(X_val, y_val, batch_size=batch_size)
                 logs["val_loss"] = val_loss
 
             if verbose:
@@ -309,20 +336,7 @@ class Sequential:
             Dictionary with 'loss' and optionally other metrics
         """
         self.eval_mode()
-
-        n_samples = len(X)
-        total_loss = 0.0
-        n_batches = 0
-
-        for i in range(0, n_samples, batch_size):
-            X_batch = X[i : i + batch_size]
-            y_batch = y[i : i + batch_size]
-
-            y_pred = self.predict(X_batch)
-            total_loss += self.compute_loss(y_batch, y_pred)
-            n_batches += 1
-
-        return {"loss": total_loss / n_batches}
+        return {"loss": self._average_loss(X, y, batch_size=batch_size)}
 
     def summary(self) -> str:
         """Return a summary of the model architecture.

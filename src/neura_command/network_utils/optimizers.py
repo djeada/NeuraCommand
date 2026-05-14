@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
 import numpy as np
 
@@ -157,6 +157,7 @@ class Adam(Optimizer):
         self._m: Dict[int, np.ndarray] = {}  # First moment
         self._v: Dict[int, np.ndarray] = {}  # Second moment
         self._t: int = 0  # Timestep
+        self._current_step_t: Optional[int] = None
 
     def update(
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
@@ -166,10 +167,10 @@ class Adam(Optimizer):
             self._m[param_id] = np.zeros_like(weights)
             self._v[param_id] = np.zeros_like(weights)
 
-        # Increment timestep (once per step, not per parameter)
-        # This is handled in step() method, but for single calls:
-        if not hasattr(self, "_step_called"):
+        step_t = self._current_step_t
+        if step_t is None:
             self._t += 1
+            step_t = self._t
 
         m = self._m[param_id]
         v = self._v[param_id]
@@ -183,8 +184,8 @@ class Adam(Optimizer):
         self._v[param_id] = v
 
         # Bias correction
-        m_hat = m / (1 - self.beta1**self._t)
-        v_hat = v / (1 - self.beta2**self._t)
+        m_hat = m / (1 - self.beta1**step_t)
+        v_hat = v / (1 - self.beta2**step_t)
 
         # AdamW-style weight decay (applied to weights, not gradient)
         if self.weight_decay > 0:
@@ -195,15 +196,18 @@ class Adam(Optimizer):
 
     def step(self, layers) -> None:
         """Update all parameters, incrementing timestep once."""
-        self._t += 1
-        self._step_called = True
-        super().step(layers)
-        del self._step_called
+        self._current_step_t = self._t + 1
+        try:
+            super().step(layers)
+        finally:
+            self._t = self._current_step_t
+            self._current_step_t = None
 
     def reset(self) -> None:
         self._m = {}
         self._v = {}
         self._t = 0
+        self._current_step_t = None
 
 
 class RMSprop(Optimizer):
@@ -399,6 +403,7 @@ class Nadam(Optimizer):
         self._m: Dict[int, np.ndarray] = {}  # First moment
         self._v: Dict[int, np.ndarray] = {}  # Second moment
         self._t: int = 0  # Timestep
+        self._current_step_t: Optional[int] = None
 
     def update(
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
@@ -408,9 +413,10 @@ class Nadam(Optimizer):
             self._m[param_id] = np.zeros_like(weights)
             self._v[param_id] = np.zeros_like(weights)
 
-        # Increment timestep (once per step, not per parameter)
-        if not hasattr(self, "_step_called"):
+        step_t = self._current_step_t
+        if step_t is None:
             self._t += 1
+            step_t = self._t
 
         m = self._m[param_id]
         v = self._v[param_id]
@@ -424,12 +430,12 @@ class Nadam(Optimizer):
         self._v[param_id] = v
 
         # Bias correction
-        m_hat = m / (1 - self.beta1**self._t)
-        v_hat = v / (1 - self.beta2**self._t)
+        m_hat = m / (1 - self.beta1**step_t)
+        v_hat = v / (1 - self.beta2**step_t)
 
         # Nesterov momentum: use the corrected gradient estimate
         # m_nesterov = beta1 * m_hat + (1 - beta1) * gradient / (1 - beta1**t)
-        g_prime = gradient / (1 - self.beta1**self._t)
+        g_prime = gradient / (1 - self.beta1**step_t)
         m_nesterov = self.beta1 * m_hat + (1 - self.beta1) * g_prime
 
         # AdamW-style weight decay
@@ -441,12 +447,15 @@ class Nadam(Optimizer):
 
     def step(self, layers) -> None:
         """Update all parameters, incrementing timestep once."""
-        self._t += 1
-        self._step_called = True
-        super().step(layers)
-        del self._step_called
+        self._current_step_t = self._t + 1
+        try:
+            super().step(layers)
+        finally:
+            self._t = self._current_step_t
+            self._current_step_t = None
 
     def reset(self) -> None:
         self._m = {}
         self._v = {}
         self._t = 0
+        self._current_step_t = None

@@ -35,7 +35,7 @@ class LoadJsonMenu(StepBasedMenu):
         """Load the JSON file from the stored path."""
         if self.file_path:  # Ensure the file path was set
             try:
-                with open(self.file_path, "r") as file:
+                with open(self.file_path, "r", encoding="utf-8") as file:
                     data = json.load(file)
                     self.result = NetworkBuilder.from_json(json_config=data)
                     print(f"Successfully loaded network from {self.file_path}")
