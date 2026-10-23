@@ -34,5 +34,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         handler = CommandHandler()
         handler.execute_command()
         return 0
+    except (ValueError, OSError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
     finally:
         sys.argv = previous_argv

@@ -7,15 +7,15 @@ No backward pass, no optimizer, no training code.
 Usage:
     from neura_command.inference import InferenceModel
     from neura_command import Sequential
-    
+
     # From saved model
     inference = InferenceModel.from_file('model')
     predictions = inference.predict(X)
-    
+
     # From Sequential model
     inference = InferenceModel.from_sequential(model)
     predictions = inference.predict(X)
-    
+
     # With quantization
     inference = InferenceModel.from_sequential(model, quantize='float16')
 """
@@ -26,10 +26,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
-from neura_command.backend import to_numpy
+from neura_command.backend import to_numpy, to_device, normalize_device, get_backend
 
 _INFERENCE_ARTIFACT_TYPE = "inference_model"
-_INFERENCE_FORMAT_VERSION = "1.0"
+_INFERENCE_FORMAT_VERSION = "2.0"
 
 
 class InferenceModel:
@@ -43,7 +43,9 @@ class InferenceModel:
     No training capabilities - pure prediction only.
     """
 
-    def __init__(self, layers: List, metadata: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self, layers: List, metadata: Optional[Dict[str, Any]] = None, device="cpu"
+    ):
         """Create inference model from layers.
 
         Args:
@@ -52,6 +54,19 @@ class InferenceModel:
         """
         self.layers = layers
         self.metadata = metadata or {}
+        self.to(device)
+
+    @property
+    def device(self):
+        return self._device
+
+    def to(self, device):
+        device = normalize_device(device)
+        get_backend(device)
+        for layer in self.layers:
+            layer.to(device)
+        self._device = device
+        return self
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         """Run inference.
@@ -62,10 +77,12 @@ class InferenceModel:
         Returns:
             Model predictions
         """
-        out = x
+        out = to_device(x, self._device)
+        xp = get_backend(self._device)
+        out = out.astype(xp.float32, copy=False)
         for layer in self.layers:
             out = layer.forward(out)
-        return out
+        return to_numpy(out)
 
     def __call__(self, x: np.ndarray) -> np.ndarray:
         """Alias for predict()."""
@@ -76,40 +93,56 @@ class InferenceModel:
         cls,
         model,
         quantize: Optional[Literal["float16", "int8"]] = None,
+        *,
+        device="cpu",
+        optimize=False,
+        per_channel=False,
+        prune_threshold=0.0,
     ) -> "InferenceModel":
         """Create InferenceModel from a Sequential model.
 
         Args:
             model: Sequential model
             quantize: Optional quantization ('float16' or 'int8')
+            device: Inference device; defaults to CPU independently of the source
+            optimize: Fold BatchNorm and compact unused hidden channels
+            per_channel: Use one INT8 scale per Dense output channel
+            prune_threshold: Optional lossy outgoing-weight threshold (requires optimize)
 
         Returns:
             InferenceModel for inference
         """
-        if quantize:
-            from neura_command.inference.quantization import (
-                quantize_model,
-                QuantizationConfig,
-            )
+        from neura_command.inference.quantization import (
+            quantize_model,
+            QuantizationConfig,
+        )
 
-            layers = quantize_model(model, QuantizationConfig(dtype=quantize))
-        else:
-            # Use original layers in eval mode
-            layers = _wrap_layers_for_inference(model.layers)
+        layers = quantize_model(
+            model,
+            QuantizationConfig(dtype=quantize or "float32", per_channel=per_channel),
+            optimize=optimize,
+            prune_threshold=prune_threshold,
+        )
 
         metadata = {
             "source": "Sequential",
             "num_parameters": model.num_parameters,
             "quantized": quantize or "none",
+            "optimized": optimize,
+            "prune_threshold": prune_threshold,
+            "source_layers": len(model.layers),
         }
 
-        return cls(layers, metadata)
+        return cls(layers, metadata, device=device)
 
     @classmethod
     def from_file(
         cls,
         path: str,
         quantize: Optional[Literal["float16", "int8"]] = None,
+        *,
+        device="cpu",
+        **kwargs,
     ) -> "InferenceModel":
         """Load InferenceModel from saved model files.
 
@@ -126,12 +159,16 @@ class InferenceModel:
                     "Cannot apply quantization while loading an exported inference artifact. "
                     "Re-export the model with the desired quantization."
                 )
-            return cls.load(path)
+            if kwargs:
+                raise ValueError(
+                    "Export options cannot be applied to an existing inference artifact"
+                )
+            return cls.load(path, device=device)
 
         from neura_command.serialization import load_model
 
         model = load_model(path)
-        return cls.from_sequential(model, quantize=quantize)
+        return cls.from_sequential(model, quantize=quantize, device=device, **kwargs)
 
     def save(self, path: str) -> None:
         """Save an inference artifact as JSON metadata plus NPZ arrays."""
@@ -156,7 +193,7 @@ class InferenceModel:
         np.savez(npz_path, **arrays)
 
     @classmethod
-    def load(cls, path: str) -> "InferenceModel":
+    def load(cls, path: str, *, device="cpu") -> "InferenceModel":
         """Load an exported inference artifact."""
         original_path, json_path, npz_path = _artifact_paths(path)
         _raise_if_pickle_artifact(original_path)
@@ -177,17 +214,17 @@ class InferenceModel:
             )
 
         format_version = config.get("format_version", "1.0")
-        if not format_version.startswith("1."):
+        if str(format_version).split(".", 1)[0] not in {"1", "2"}:
             raise ValueError(
                 f"Unsupported inference artifact format version: {format_version}"
             )
 
-        weights = np.load(npz_path, allow_pickle=False)
-        layers = [
-            _deserialize_inference_layer(layer_config, weights)
-            for layer_config in config["layers"]
-        ]
-        return cls(layers=layers, metadata=config.get("metadata"))
+        with np.load(npz_path, allow_pickle=False) as weights:
+            layers = [
+                _deserialize_inference_layer(layer_config, weights)
+                for layer_config in config["layers"]
+            ]
+        return cls(layers=layers, metadata=config.get("metadata"), device=device)
 
     @staticmethod
     def artifact_paths(path: str) -> Tuple[Path, Path]:
@@ -196,10 +233,25 @@ class InferenceModel:
         return json_path, npz_path
 
     @property
-    def memory_bytes(self) -> int:
-        """Estimate memory usage of the model in bytes."""
+    def num_parameters(self):
+        """Deployed Dense/BatchNorm parameter count after graph compaction."""
         total = 0
         for layer in self.layers:
+            actual = layer.layer if isinstance(layer, _InferenceLayerWrapper) else layer
+            for name in ("weights", "bias", "gamma", "beta"):
+                value = getattr(actual, name, None)
+                if value is not None:
+                    total += value.size
+        return total
+
+    @property
+    def memory_bytes(self) -> int:
+        """Parameter storage including quantization scales (excludes Python overhead)."""
+        total = 0
+        for layer in self.layers:
+            if hasattr(layer, "memory_bytes"):
+                total += layer.memory_bytes
+                continue
             # Handle wrapped layers
             actual_layer = (
                 layer.layer if isinstance(layer, _InferenceLayerWrapper) else layer
@@ -219,6 +271,20 @@ class InferenceModel:
                 total += actual_layer.running_var.nbytes
         return total
 
+    def export_c(
+        self, path, *, name="neura_model", max_weight_bytes=None, max_scratch_bytes=None
+    ):
+        """Write C99 source/header and an exact parameter/scratch storage report."""
+        from neura_command.inference.c_export import export_c
+
+        return export_c(
+            self,
+            path,
+            name=name,
+            max_weight_bytes=max_weight_bytes,
+            max_scratch_bytes=max_scratch_bytes,
+        )
+
     def info(self) -> str:
         """Get model info as a formatted string."""
         lines = [
@@ -226,6 +292,7 @@ class InferenceModel:
             f"  Layers: {len(self.layers)}",
             f"  Memory: {self.memory_bytes / 1024:.1f} KB",
             f"  Quantized: {self.metadata.get('quantized', 'none')}",
+            f"  Device: {self.device}",
         ]
         return "\n".join(lines)
 
@@ -241,6 +308,10 @@ class _InferenceLayerWrapper:
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         return self.layer.forward(x, training=False)
+
+    def to(self, device):
+        self.layer.to(device)
+        return self
 
 
 def _wrap_layers_for_inference(layers) -> List:
@@ -352,6 +423,7 @@ def _serialize_inference_layer(
         QuantizedBatchNorm,
         QuantizedDense,
         QuantizedDropout,
+        QuantizedFlatten,
     )
 
     if isinstance(layer, _InferenceLayerWrapper):
@@ -372,6 +444,8 @@ def _serialize_inference_layer(
             "runtime": "quantized",
             "class": "QuantizedDropout",
         }
+    if isinstance(layer, QuantizedFlatten):
+        return {"runtime": "quantized", "class": "QuantizedFlatten"}
 
     raise TypeError(f"Unsupported inference layer type: {type(layer).__name__}")
 
@@ -492,6 +566,11 @@ def _serialize_quantized_dense(
         "dtype": layer.dtype,
         "use_bias": layer.use_bias,
         "weights_key": weights_key,
+        "activation": (
+            {"name": layer.activation.activation_type, "alpha": layer.activation.alpha}
+            if layer.activation is not None
+            else None
+        ),
     }
 
     if layer.use_bias and layer.bias is not None:
@@ -503,8 +582,8 @@ def _serialize_quantized_dense(
         params = layer.quant_params["weights"]
         config["quant_params"] = {
             "weights": {
-                "scale": params.scale,
-                "zero_point": params.zero_point,
+                "scale": to_numpy(params.scale).tolist(),
+                "zero_point": to_numpy(params.zero_point).tolist(),
                 "min_val": params.min_val,
                 "max_val": params.max_val,
             }
@@ -570,6 +649,7 @@ def _deserialize_wrapped_layer(config: Dict[str, Any], arrays):
             out_features=config["out_features"],
             activation=_deserialize_activation_function(config.get("activation")),
             use_bias=config.get("use_bias", True),
+            device="cpu",
         )
         layer.weights[...] = arrays[config["weights_key"]]
         if layer.use_bias and "bias_key" in config:
@@ -581,6 +661,7 @@ def _deserialize_wrapped_layer(config: Dict[str, Any], arrays):
             num_features=config["num_features"],
             epsilon=config.get("epsilon", 1e-5),
             momentum=config.get("momentum", 0.1),
+            device="cpu",
         )
         layer.gamma[...] = arrays[config["gamma_key"]]
         layer.beta[...] = arrays[config["beta_key"]]
@@ -589,25 +670,27 @@ def _deserialize_wrapped_layer(config: Dict[str, Any], arrays):
         return layer
 
     if class_name == "Dropout":
-        return Dropout(rate=config["rate"])
+        return Dropout(rate=config["rate"], device="cpu")
     if class_name == "Flatten":
         return Flatten()
     if class_name == "Input":
         return Input(shape=tuple(config["shape"]))
     if class_name == "ReLU":
-        return ReLU()
+        return ReLU(device="cpu")
     if class_name == "Sigmoid":
-        return Sigmoid()
+        return Sigmoid(device="cpu")
     if class_name == "Softmax":
-        return Softmax()
+        return Softmax(device="cpu")
     if class_name == "Tanh":
-        return Tanh()
+        return Tanh(device="cpu")
     if class_name == "LeakyReLU":
-        return LeakyReLU(alpha=config.get("alpha", 0.01))
+        return LeakyReLU(alpha=config.get("alpha", 0.01), device="cpu")
     if class_name == "ELU":
-        return ELU(alpha=config.get("alpha", 1.0))
+        return ELU(alpha=config.get("alpha", 1.0), device="cpu")
     if class_name == "Activation":
-        return Activation(_deserialize_activation_function(config["activation"]))
+        return Activation(
+            _deserialize_activation_function(config["activation"]), device="cpu"
+        )
 
     raise ValueError(f"Unsupported wrapped inference layer type: {class_name}")
 
@@ -619,6 +702,7 @@ def _deserialize_quantized_layer(config: Dict[str, Any], arrays):
         QuantizedBatchNorm,
         QuantizedDense,
         QuantizedDropout,
+        QuantizedFlatten,
     )
 
     class_name = config["class"]
@@ -630,8 +714,16 @@ def _deserialize_quantized_layer(config: Dict[str, Any], arrays):
             params = config["quant_params"]["weights"]
             quant_params = {
                 "weights": Int8QuantizationParams(
-                    scale=params["scale"],
-                    zero_point=params["zero_point"],
+                    scale=(
+                        np.asarray(params["scale"], dtype=np.float32)
+                        if isinstance(params["scale"], list)
+                        else params["scale"]
+                    ),
+                    zero_point=(
+                        np.asarray(params["zero_point"], dtype=np.int32)
+                        if isinstance(params["zero_point"], list)
+                        else params["zero_point"]
+                    ),
                     min_val=params["min_val"],
                     max_val=params["max_val"],
                 )
@@ -641,6 +733,13 @@ def _deserialize_quantized_layer(config: Dict[str, Any], arrays):
             bias=bias,
             dtype=config["dtype"],
             quant_params=quant_params,
+            activation=(
+                QuantizedActivation(
+                    config["activation"]["name"], config["activation"].get("alpha")
+                )
+                if config.get("activation")
+                else None
+            ),
         )
 
     if class_name == "QuantizedBatchNorm":
@@ -661,5 +760,7 @@ def _deserialize_quantized_layer(config: Dict[str, Any], arrays):
 
     if class_name == "QuantizedDropout":
         return QuantizedDropout()
+    if class_name == "QuantizedFlatten":
+        return QuantizedFlatten()
 
     raise ValueError(f"Unsupported quantized inference layer type: {class_name}")

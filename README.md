@@ -6,6 +6,10 @@ NeuraCommand is a Python package and CLI tool designed for streamlined creation,
 
 ## Features
 
+- **Embedded C99 Export**: Export float32 or packed INT8 networks with constant weights, caller-owned scratch RAM, and enforceable parameter/RAM budgets. Export folds eligible BatchNorm layers and compacts unused hidden channels.
+
+- **CPU and CUDA Training/Inference**: NumPy is the only required dependency. Optional CuPy enables GPU training and inference through the Python API and `--device cpu|cuda|gpu` CLI options.
+
 - **Flexible Network Creation Library**: A library built on top of numpy, providing the flexibility to create various network configurations easily.
 
 - **Intuitive Command-Line Interface (CLI)**: A user-friendly CLI that simplifies neural network operations, enhancing accessibility for usage in different programming languages or embedded systems.
@@ -114,6 +118,102 @@ Use `export` to save an inference-only artifact for deployment. Exported inferen
 ```shell
 neura_command export --model path/to/model --output path/to/inference_model --quantize float16
 ```
+
+For an embedded target without Python, export C99 with INT8 weight storage:
+
+```shell
+neura_command export --model path/to/model --output firmware/model \
+  --format c --quantize int8 --per-channel \
+  --max-weight-bytes 16384 --max-scratch-bytes 2048
+```
+
+This writes `model.c`, `model.h`, and `model.report.json`. The generated function uses float32 inputs, outputs, and accumulation, reads packed weights directly, and performs no dynamic allocation. Budgets cover constant parameter arrays and the declared scratch buffer; code, alignment, the C math library, input/output arrays, and scalar stack overhead are additional. C99 export supports float32 and INT8 storage; float16 storage is available in the Python runtime.
+
+Optimization is enabled by default in the export command. `--no-optimize` disables it. `--prune-threshold 0.001` additionally removes hidden channels with small outgoing weights; a nonzero threshold is lossy and must be checked against held-out data. INT8 quantization also requires accuracy validation. [Embedded deployment details](docs/embedded.md) cover the C API, memory reports, and a runnable example.
+
+Exported JSON+NPZ artifacts can be used directly by `predict`:
+
+```shell
+neura_command predict --model path/to/inference_model --input-csv inputs.csv --device cpu
+```
+
+### CPU and GPU execution
+
+CPU execution is the default. From a checkout, install one GPU extra matching your CUDA toolkit and driver:
+
+```shell
+python -m pip install -e ".[cuda12]"
+# For CUDA 13, use: python -m pip install -e ".[cuda13]"
+```
+
+CuPy remains optional. Follow the [CuPy installation guide](https://docs.cupy.dev/en/stable/install.html) for driver/toolkit requirements; install one CuPy distribution in an environment.
+
+```shell
+neura_command train --model model --features-csv features.csv --targets-csv targets.csv \
+  --device cuda --epochs 50 --batch-size 32 --output trained
+neura_command predict --model trained --input-csv inputs.csv --device cuda
+```
+
+`create` also accepts `--device`. `gpu` is an alias for `cuda`; selecting CUDA without a usable GPU raises an error. Legacy pickle models support CPU execution only.
+
+```python
+model.to("cuda")                  # Moves parameters and existing optimizer moments
+model.train(X, y, epochs=10)       # Accepts NumPy or CuPy arrays
+predictions = model.predict(X)    # Returns a NumPy array on CPU
+model.to("cpu")                   # Continue training or predicting on CPU
+model.save("trained")             # Portable JSON+NPZ, including from a GPU model
+
+from neura_command import InferenceModel
+lean = InferenceModel.from_sequential(
+    model, quantize="int8", per_channel=True, optimize=True
+)
+lean.save("deployment")
+gpu_inference = InferenceModel.load("deployment", device="cuda")
+```
+
+Inference snapshots own their parameters and contain no training caches or gradients. Python inference defaults to CPU regardless of the source model's device. INT8 is weight-only quantization with float32 computation, and Python float16 exports also accumulate in float32. The Python API keeps `optimize=False` by default for compatibility; enable it explicitly for compact deployment.
+
+### Reproducible training and callbacks
+
+Use `create --seed 42` to reproduce initial weights, and `train --seed 42` to reproduce validation splitting, shuffling, and dropout on the selected backend. `train --no-shuffle` preserves input order and reserves the last samples for validation. A batch may be larger than the dataset; the final partial batch is supported. Validation fractions must be in `[0, 1)` and always produce non-empty training/validation sets when requested on at least two samples.
+
+```shell
+neura_command create --architecture architecture.json --output initial --seed 42
+neura_command train --model initial --features-csv features.csv --targets-csv targets.csv \
+  --output trained --seed 42 --validation-split 0.2 --early-stopping 10 \
+  --save-history results/history.json
+```
+
+`EarlyStopping` now restores the best parameters and BatchNorm running statistics. Restoring a weights snapshot resets optimizer moments; it does not restore a full optimizer checkpoint. `LearningRateScheduler` updates the bound model's optimizer, batch callbacks receive sample counts and losses, and history records the actual learning rate.
+
+```python
+from neura_command import EarlyStopping, LearningRateScheduler, set_random_seed
+
+set_random_seed(42, device="cpu")  # Before constructing layers
+history = model.train(
+    X, y, seed=42, validation_data=(X_val, y_val),
+    callbacks=[EarlyStopping(patience=10),
+               LearningRateScheduler(lambda epoch, rate: rate * 0.98)],
+)
+snapshot = model.get_weights()    # Includes non-trainable inference buffers
+model.set_weights(snapshot)       # Validates every shape before changing values
+```
+
+Features and targets must be finite real data. One-dimensional training arrays become single-feature/target columns; other target shapes must match predictions exactly. Multi-output MSE/Huber and BatchNorm parameter gradients follow the same batch-mean convention. `eval_mode()` controls `forward()` unless `training=` is explicitly supplied; evaluation preserves the model's previous mode.
+
+For scripting, `info --format json` accepts both training models and inference artifacts, and `export --json` writes a standalone JSON resource report to stdout. `export --quiet` suppresses success messages. Invalid numeric options and unknown/abbreviated flags fail during parsing. Training models preserve dotted base names such as `model.v2.json`/`model.v2.npz`, while old paths remain readable.
+
+### Runnable demos
+
+All demos generate synthetic data locally, save their inputs/history/metrics, support CPU/CUDA, and can compile and execute generated C for comparison. They use separate training, validation, and test data.
+
+```shell
+python examples/embedded_demo.py --seed 42 --verify-c
+python examples/regression_demo.py --seed 42 --verify-c
+python examples/cli_demo.py --seed 42 --verify-c
+```
+
+Use `--epochs`, `--samples`, `--hidden`, `--batch-size`, `--output-dir`, and memory-budget flags to adjust a run. `--verify-c` requires a native C99 compiler. See the [demo guide](examples/README.md) for outputs and examples.
 
 ### Analyze
 

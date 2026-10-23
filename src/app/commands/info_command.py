@@ -3,6 +3,7 @@ Info command - display model information.
 """
 
 import argparse
+import sys
 
 from app.commands.base_command import BaseCommand
 
@@ -34,24 +35,30 @@ class InfoCommand(BaseCommand):
 
         try:
             info = get_model_info(path)
-            model = load_model(path)
-        except FileNotFoundError:
-            print(f"Error: Model not found at '{path}'")
-            print("Expected files: {path}.json and {path}.npz")
-            return
+            if info["artifact_type"] == "inference_model":
+                from neura_command.inference import InferenceModel
+
+                model = InferenceModel.load(path)
+                parameter_bytes = model.memory_bytes
+                summary = model.info()
+            else:
+                model = load_model(path)
+                parameter_bytes = sum(value.nbytes for value in model._weight_arrays())
+                summary = model.summary()
         except Exception as e:
-            print(f"Error loading model: {e}")
-            return
+            print(f"Error loading model: {e}", file=sys.stderr)
+            raise SystemExit(1) from e
+
+        info["total_parameters"] = model.num_parameters
+        info["parameter_bytes"] = parameter_bytes
+        info["device"] = model.device
 
         if self.args.format == "json":
             # Add parameter count to info
-            info["total_parameters"] = model.num_parameters
             print(json.dumps(info, indent=2, default=str))
         else:
-            print(model.summary())
+            print(summary)
             print(f"\nModel file: {path}")
             print(f"Weights size: {info['weights_size_bytes'] / 1024:.1f} KB")
-            if info.get("metadata"):
-                print(
-                    f"Saved at: {info.get('metadata', {}).get('saved_at', 'unknown')}"
-                )
+            if info.get("saved_at"):
+                print(f"Saved at: {info['saved_at']}")

@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Optional, List, Dict, Any
 
 import numpy as np
@@ -6,6 +6,12 @@ import numpy as np
 
 class Callback(ABC):
     """Base class for training callbacks."""
+
+    model = None
+
+    def set_model(self, model) -> None:
+        """Bind the model before training starts."""
+        self.model = model
 
     def on_train_begin(self, logs: Optional[Dict[str, Any]] = None) -> None:
         """Called at the beginning of training."""
@@ -60,6 +66,12 @@ class EarlyStopping(Callback):
             restore_best_weights: Whether to restore model weights from the epoch
                                   with the best value of the monitored quantity.
         """
+        if mode not in {"min", "max"}:
+            raise ValueError("mode must be 'min' or 'max'")
+        if not isinstance(patience, int) or isinstance(patience, bool) or patience < 0:
+            raise ValueError("patience must be a non-negative integer")
+        if not np.isfinite(min_delta) or min_delta < 0:
+            raise ValueError("min_delta must be finite and non-negative")
         self.monitor = monitor
         self.min_delta = min_delta
         self.patience = patience
@@ -77,6 +89,7 @@ class EarlyStopping(Callback):
         self.wait = 0
         self.stopped_epoch = 0
         self.best_weights = None
+        self.best_epoch = 0
 
     def on_epoch_end(self, epoch: int, logs: Optional[Dict[str, Any]] = None) -> bool:
         logs = logs or {}
@@ -89,8 +102,11 @@ class EarlyStopping(Callback):
             self.best = current
             self.best_epoch = epoch
             self.wait = 0
-            if self.restore_best_weights and "weights" in logs:
-                self.best_weights = [w.copy() for w in logs["weights"]]
+            if self.restore_best_weights:
+                if self.model is not None:
+                    self.best_weights = self.model.get_weights()
+                elif "weights" in logs:
+                    self.best_weights = [w.copy() for w in logs["weights"]]
         else:
             self.wait += 1
             if self.wait >= self.patience:
@@ -98,6 +114,16 @@ class EarlyStopping(Callback):
                 return True  # Signal to stop training
 
         return False
+
+    def on_train_end(self, logs=None):
+        if (
+            self.restore_best_weights
+            and self.best_weights is not None
+            and self.model is not None
+        ):
+            # Running statistics are part of the snapshot. Discard moments from
+            # later epochs so subsequent training starts from consistent state.
+            self.model.set_weights(self.best_weights)
 
     def _is_improvement(self, current: float) -> bool:
         if self.mode == "min":
@@ -138,9 +164,15 @@ class LearningRateScheduler(Callback):
     def on_epoch_begin(self, epoch: int, logs: Optional[Dict[str, Any]] = None) -> None:
         logs = logs or {}
         current_lr = logs.get("learning_rate", 0.01)
+        if self.model is not None:
+            current_lr = self.model.optimizer.learning_rate
         new_lr = self.schedule(epoch, current_lr)
+        if not np.isfinite(new_lr) or new_lr < 0:
+            raise ValueError("Scheduled learning rate must be finite and non-negative")
         self.current_lr = new_lr
-        if "set_learning_rate" in logs:
+        if self.model is not None:
+            self.model.optimizer.learning_rate = new_lr
+        elif "set_learning_rate" in logs:
             logs["set_learning_rate"](new_lr)
 
 
@@ -162,7 +194,7 @@ class HistoryCallback(Callback):
                 is_numeric = True
             except (TypeError, ValueError):
                 is_numeric = False
-            
+
             if is_numeric:
                 if key not in self.history:
                     self.history[key] = []
@@ -221,9 +253,12 @@ class CosineAnnealingScheduler(Callback):
             adjusted_epoch = epoch - self.warmup_epochs
             adjusted_T_max = self.T_max - self.warmup_epochs
             if adjusted_T_max > 0:
-                self.current_lr = self.min_lr + (self.initial_lr - self.min_lr) * (
-                    1 + np.cos(np.pi * adjusted_epoch / adjusted_T_max)
-                ) / 2
+                self.current_lr = (
+                    self.min_lr
+                    + (self.initial_lr - self.min_lr)
+                    * (1 + np.cos(np.pi * adjusted_epoch / adjusted_T_max))
+                    / 2
+                )
             else:
                 self.current_lr = self.min_lr
 

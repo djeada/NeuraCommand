@@ -9,7 +9,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -21,6 +20,22 @@ class TrainNetworkCommand(BaseCommand):
 
     @staticmethod
     def add_arguments(parser):
+        parser.add_argument(
+            "--seed",
+            type=BaseCommand.seed,
+            help="Seed validation splitting, shuffling, and dropout.",
+        )
+        parser.add_argument(
+            "--no-shuffle",
+            action="store_true",
+            help="Keep input order for validation splitting and training epochs.",
+        )
+        parser.add_argument(
+            "--device",
+            choices=["cpu", "cuda", "gpu"],
+            default="cpu",
+            help="Training device (CUDA requires optional CuPy and a working GPU).",
+        )
         # Model paths
         parser.add_argument(
             "--model",
@@ -46,29 +61,29 @@ class TrainNetworkCommand(BaseCommand):
         # Training parameters
         parser.add_argument(
             "--epochs",
-            type=int,
+            type=BaseCommand.positive_int,
             default=100,
             help="Number of training epochs (default: 100).",
         )
         parser.add_argument(
             "--batch-size",
-            type=int,
+            type=BaseCommand.positive_int,
             default=32,
             help="Batch size for training (default: 32).",
         )
         parser.add_argument(
             "--learning-rate",
             "--lr",
-            type=float,
+            type=BaseCommand.positive_float,
             default=None,
             dest="learning_rate",
             help="Learning rate (overrides model's optimizer learning rate).",
         )
         parser.add_argument(
             "--validation-split",
-            type=float,
+            type=BaseCommand.validation_fraction,
             default=0.0,
-            help="Fraction of data to use for validation (0.0-0.5, default: 0.0).",
+            help="Fraction of data to use for validation in [0, 1), default: 0.0.",
         )
 
         # Output options
@@ -78,7 +93,7 @@ class TrainNetworkCommand(BaseCommand):
             type=str,
             default=None,
             dest="output",
-            help="Path to save the trained model. Defaults to overwriting input model.",
+            help="Path to save the trained model. Required unless --overwrite is given.",
         )
         parser.add_argument(
             "--overwrite",
@@ -113,7 +128,7 @@ class TrainNetworkCommand(BaseCommand):
         # Early stopping
         parser.add_argument(
             "--early-stopping",
-            type=int,
+            type=BaseCommand.positive_int,
             default=None,
             metavar="PATIENCE",
             help="Enable early stopping with specified patience (epochs).",
@@ -122,6 +137,10 @@ class TrainNetworkCommand(BaseCommand):
     def execute(self):
         # Configure logging
         self._configure_logging()
+        if getattr(self.args, "seed", None) is not None:
+            from neura_command import set_random_seed
+
+            set_random_seed(self.args.seed, getattr(self.args, "device", "cpu"))
 
         if not self._has_output_destination():
             self._log_error("Output path not specified. Use --output or --overwrite.")
@@ -160,6 +179,8 @@ class TrainNetworkCommand(BaseCommand):
         history = self._train_model(
             model, train_features, train_targets, val_features, val_targets, callbacks
         )
+        if history is None:
+            sys.exit(1)
 
         # Save training history if requested
         if self.args.save_history:
@@ -174,9 +195,9 @@ class TrainNetworkCommand(BaseCommand):
 
     def _configure_logging(self):
         """Configure logging based on verbose/quiet flags."""
-        if getattr(self.args, 'quiet', False):
+        if getattr(self.args, "quiet", False):
             level = logging.ERROR
-        elif getattr(self.args, 'verbose', False):
+        elif getattr(self.args, "verbose", False):
             level = logging.DEBUG
         else:
             level = logging.INFO
@@ -189,7 +210,7 @@ class TrainNetworkCommand(BaseCommand):
 
     def _log_info(self, message: str):
         """Log info message unless quiet mode is enabled."""
-        if not getattr(self.args, 'quiet', False):
+        if not getattr(self.args, "quiet", False):
             print(message)
 
     def _log_error(self, message: str):
@@ -203,7 +224,8 @@ class TrainNetworkCommand(BaseCommand):
         # Try modern format first
         try:
             from neura_command.serialization import load_model
-            model = load_model(model_path)
+
+            model = load_model(model_path, device=getattr(self.args, "device", "cpu"))
             self._log_info(f"Loaded model from {model_path} (modern format)")
             self._model_format = "modern"
             return model
@@ -214,12 +236,19 @@ class TrainNetworkCommand(BaseCommand):
             return None
 
         # Try legacy pickle format
-        if model_path.endswith('.pkl') or Path(model_path + '.pkl').exists():
+        if model_path.endswith(".pkl") or Path(model_path + ".pkl").exists():
             try:
+                if getattr(self.args, "device", "cpu") != "cpu":
+                    raise ValueError(
+                        "Legacy models support CPU only; create a modern model for CUDA"
+                    )
                 from neura_command.deprecated.feed_forward_network.feed_forward_network_io import (
                     FeedForwardNetworkIO,
                 )
-                pkl_path = model_path if model_path.endswith('.pkl') else model_path + '.pkl'
+
+                pkl_path = (
+                    model_path if model_path.endswith(".pkl") else model_path + ".pkl"
+                )
                 model = FeedForwardNetworkIO.load_from_pickle(pkl_path)
                 self._log_info(f"Loaded model from {pkl_path} (legacy format)")
                 self._model_format = "legacy"
@@ -235,24 +264,30 @@ class TrainNetworkCommand(BaseCommand):
 
     def _set_learning_rate(self, model, lr: float):
         """Update the model's optimizer learning rate."""
-        if hasattr(model, 'optimizer') and hasattr(model.optimizer, 'learning_rate'):
+        if hasattr(model, "optimizer") and hasattr(model.optimizer, "learning_rate"):
             old_lr = model.optimizer.learning_rate
             model.optimizer.learning_rate = lr
             self._log_info(f"Learning rate changed: {old_lr} -> {lr}")
         else:
-            self.logger.warning("Could not update learning rate (model may not support it)")
+            self.logger.warning(
+                "Could not update learning rate (model may not support it)"
+            )
 
     def _load_training_data(self):
         """Load training features and targets from CSV files."""
         try:
-            features = np.loadtxt(self.args.features_csv, delimiter=",")
+            features = np.loadtxt(
+                self.args.features_csv, delimiter=",", dtype=np.float32, ndmin=2
+            )
             self._log_info(f"Loaded features: shape {features.shape}")
         except Exception as e:
             self._log_error(f"Error loading features: {e}")
             return None, None
 
         try:
-            targets = np.loadtxt(self.args.targets_csv, delimiter=",")
+            targets = np.loadtxt(
+                self.args.targets_csv, delimiter=",", dtype=np.float32, ndmin=2
+            )
             self._log_info(f"Loaded targets: shape {targets.shape}")
         except Exception as e:
             self._log_error(f"Error loading targets: {e}")
@@ -270,11 +305,12 @@ class TrainNetworkCommand(BaseCommand):
             )
             return False
 
-        if len(features) < self.args.batch_size:
-            self._log_error(
-                f"Batch size ({self.args.batch_size}) is larger than "
-                f"number of samples ({len(features)})"
-            )
+        if (
+            len(features) == 0
+            or not np.all(np.isfinite(features))
+            or not np.all(np.isfinite(targets))
+        ):
+            self._log_error("Training data must be non-empty and finite")
             return False
 
         return True
@@ -286,28 +322,28 @@ class TrainNetworkCommand(BaseCommand):
         if val_split <= 0:
             return features, targets, None, None
 
-        if val_split >= 0.5:
-            self._log_error("Validation split must be less than 0.5")
-            val_split = 0.2
-
         n_samples = len(features)
-        n_val = int(n_samples * val_split)
+        if n_samples < 2:
+            self._log_error("Validation splitting requires at least two samples")
+            raise SystemExit(1)
+        n_val = min(n_samples - 1, max(1, int(n_samples * val_split)))
 
-        if n_val == 0:
-            self._log_info("Validation split too small, skipping validation")
-            return features, targets, None, None
-
-        # Shuffle indices
-        indices = np.random.permutation(n_samples)
-        val_indices = indices[:n_val]
-        train_indices = indices[n_val:]
+        if getattr(self.args, "no_shuffle", False):
+            train_indices = np.arange(n_samples - n_val)
+            val_indices = np.arange(n_samples - n_val, n_samples)
+        else:
+            indices = np.random.permutation(n_samples)
+            val_indices = indices[:n_val]
+            train_indices = indices[n_val:]
 
         val_features = features[val_indices]
         val_targets = targets[val_indices]
         train_features = features[train_indices]
         train_targets = targets[train_indices]
 
-        self._log_info(f"Using {n_val} samples for validation, {len(train_indices)} for training")
+        self._log_info(
+            f"Using {n_val} samples for validation, {len(train_indices)} for training"
+        )
 
         return train_features, train_targets, val_features, val_targets
 
@@ -323,22 +359,30 @@ class TrainNetworkCommand(BaseCommand):
         if self.args.early_stopping is not None:
             try:
                 from neura_command.network_utils.callbacks import EarlyStopping
-                callbacks.append(EarlyStopping(
-                    patience=self.args.early_stopping,
-                    monitor="loss",
-                    min_delta=1e-4,
-                ))
-                self._log_info(f"Early stopping enabled with patience={self.args.early_stopping}")
+
+                callbacks.append(
+                    EarlyStopping(
+                        patience=self.args.early_stopping,
+                        monitor="val_loss"
+                        if self.args.validation_split > 0
+                        else "loss",
+                        min_delta=1e-4,
+                    )
+                )
+                self._log_info(
+                    f"Early stopping enabled with patience={self.args.early_stopping}"
+                )
             except ImportError:
                 self.logger.warning("Early stopping not available")
 
         return callbacks if callbacks else None
 
-    def _train_model(self, model, features, targets, val_features, val_targets, callbacks):
+    def _train_model(
+        self, model, features, targets, val_features, val_targets, callbacks
+    ):
         """Train the model."""
         self._log_info(
-            f"Training for {self.args.epochs} epochs, "
-            f"batch size {self.args.batch_size}"
+            f"Training for {self.args.epochs} epochs, batch size {self.args.batch_size}"
         )
 
         try:
@@ -352,12 +396,20 @@ class TrainNetworkCommand(BaseCommand):
             train_kwargs = {
                 "epochs": self.args.epochs,
                 "batch_size": self.args.batch_size,
-                "verbose": getattr(self.args, 'verbose', False),
+                "verbose": getattr(self.args, "verbose", False),
             }
+            import inspect
+
+            train_parameters = inspect.signature(model.train).parameters
+            if "seed" in train_parameters:
+                train_kwargs["seed"] = getattr(self.args, "seed", None)
+            if "shuffle" in train_parameters:
+                train_kwargs["shuffle"] = not getattr(self.args, "no_shuffle", False)
 
             # Add validation data if the model supports it
             if val_features is not None:
                 import inspect
+
                 train_sig = inspect.signature(model.train)
                 accepts_kwargs = any(
                     parameter.kind == inspect.Parameter.VAR_KEYWORD
@@ -367,31 +419,33 @@ class TrainNetworkCommand(BaseCommand):
                     val_features = val_features.reshape(-1, 1)
                 if val_targets.ndim == 1:
                     val_targets = val_targets.reshape(-1, 1)
-                if 'validation_data' in train_sig.parameters or accepts_kwargs:
-                    train_kwargs['validation_data'] = (val_features, val_targets)
-                elif 'X_val' in train_sig.parameters:
-                    train_kwargs['X_val'] = val_features
-                    train_kwargs['y_val'] = val_targets
+                if "validation_data" in train_sig.parameters or accepts_kwargs:
+                    train_kwargs["validation_data"] = (val_features, val_targets)
+                elif "X_val" in train_sig.parameters:
+                    train_kwargs["X_val"] = val_features
+                    train_kwargs["y_val"] = val_targets
 
             # Add callbacks if the model supports them
-            if callbacks and hasattr(model, 'train'):
+            if callbacks and hasattr(model, "train"):
                 import inspect
+
                 train_sig = inspect.signature(model.train)
-                if 'callbacks' in train_sig.parameters:
-                    train_kwargs['callbacks'] = callbacks
+                if "callbacks" in train_sig.parameters:
+                    train_kwargs["callbacks"] = callbacks
 
             history = model.train(features, targets, **train_kwargs)
 
             if history is None:
                 history = {"epochs": self.args.epochs}
 
-            self._log_info(f"Training completed!")
+            self._log_info("Training completed!")
             return history
 
         except Exception as e:
             self._log_error(f"Error during training: {e}")
-            if getattr(self.args, 'verbose', False):
+            if getattr(self.args, "verbose", False):
                 import traceback
+
                 traceback.print_exc()
             return None
 
@@ -407,13 +461,14 @@ class TrainNetworkCommand(BaseCommand):
             for key, value in history.items():
                 if isinstance(value, (list, tuple)):
                     serializable_history[key] = [
-                        float(v) if hasattr(v, 'item') else v for v in value
+                        float(v) if hasattr(v, "item") else v for v in value
                     ]
-                elif hasattr(value, 'item'):
+                elif hasattr(value, "item"):
                     serializable_history[key] = float(value)
                 else:
                     serializable_history[key] = value
 
+            Path(self.args.save_history).parent.mkdir(parents=True, exist_ok=True)
             with open(self.args.save_history, "w") as f:
                 json.dump(serializable_history, f, indent=2)
             self._log_info(f"Training history saved to {self.args.save_history}")
@@ -438,7 +493,7 @@ class TrainNetworkCommand(BaseCommand):
                     print(f"\n{metric}:")
                     print(f"  Initial: {values[0]:.6f}")
                     print(f"  Final:   {values[-1]:.6f}")
-                    
+
                     if "loss" in metric.lower():
                         print(f"  Best:    {min(values):.6f}")
                     else:
@@ -460,9 +515,7 @@ class TrainNetworkCommand(BaseCommand):
         elif self.args.overwrite:
             output_path = self.args.model
         else:
-            self._log_error(
-                "Output path not specified. Use --output or --overwrite."
-            )
+            self._log_error("Output path not specified. Use --output or --overwrite.")
             return
 
         try:
@@ -470,8 +523,9 @@ class TrainNetworkCommand(BaseCommand):
                 from neura_command.deprecated.feed_forward_network.feed_forward_network_io import (
                     FeedForwardNetworkIO,
                 )
-                if not output_path.endswith('.pkl'):
-                    output_path += '.pkl'
+
+                if not output_path.endswith(".pkl"):
+                    output_path += ".pkl"
                 FeedForwardNetworkIO.save_to_pickle(model, output_path)
             else:
                 model.save(output_path)
@@ -479,3 +533,4 @@ class TrainNetworkCommand(BaseCommand):
             self._log_info(f"Model saved to {output_path}")
         except Exception as e:
             self._log_error(f"Error saving model: {e}")
+            raise SystemExit(1) from e

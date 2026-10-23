@@ -1,0 +1,38 @@
+name: CUDA integration (manual)
+
+# Requires a self-hosted Linux runner with the `gpu` label, an NVIDIA GPU,
+# its driver, the selected CUDA toolkit, and a C compiler. Never runs on PRs.
+on:
+  workflow_dispatch:
+    inputs:
+      cuda:
+        description: CUDA toolkit installed on the runner
+        type: choice
+        options: ['12', '13']
+        default: '12'
+
+permissions:
+  contents: read
+
+jobs:
+  cuda:
+    runs-on: [self-hosted, linux, gpu]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install in an isolated environment
+        env:
+          CUDA_EXTRA: cuda${{ inputs.cuda }}
+        run: |
+          python -m venv .venv-cuda
+          .venv-cuda/bin/python -m pip install --upgrade pip
+          .venv-cuda/bin/python -m pip install -r requirements-dev.txt ".[${CUDA_EXTRA}]"
+      - name: Require a working GPU and C compiler
+        run: |
+          .venv-cuda/bin/python -c "from neura_command import is_cupy_available; assert is_cupy_available(), 'CUDA is required; skipped GPU tests do not count as validation'"
+          cc --version
+      - name: Run training, transfer, persistence, inference, and C integration tests
+        run: .venv-cuda/bin/python -m pytest unit_tests/ -v

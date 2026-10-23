@@ -20,6 +20,12 @@ class PredictCommand(BaseCommand):
 
     @staticmethod
     def add_arguments(parser):
+        parser.add_argument(
+            "--device",
+            choices=["cpu", "cuda", "gpu"],
+            default="cpu",
+            help="Prediction device (default: cpu).",
+        )
         # Model and input
         parser.add_argument(
             "--model",
@@ -58,7 +64,7 @@ class PredictCommand(BaseCommand):
         # Prediction options
         parser.add_argument(
             "--batch-size",
-            type=int,
+            type=BaseCommand.positive_int,
             default=None,
             help="Batch size for prediction (useful for large datasets).",
         )
@@ -69,13 +75,13 @@ class PredictCommand(BaseCommand):
         )
         parser.add_argument(
             "--top-k",
-            type=int,
+            type=BaseCommand.positive_int,
             default=1,
             help="Show top K predictions for classification (default: 1).",
         )
         parser.add_argument(
             "--threshold",
-            type=float,
+            type=BaseCommand.probability,
             default=0.5,
             help="Classification threshold for binary predictions (default: 0.5).",
         )
@@ -95,7 +101,7 @@ class PredictCommand(BaseCommand):
         )
         parser.add_argument(
             "--precision",
-            type=int,
+            type=BaseCommand.precision,
             default=6,
             help="Decimal precision for output values (default: 6).",
         )
@@ -103,6 +109,9 @@ class PredictCommand(BaseCommand):
     def execute(self):
         # Configure logging
         self._configure_logging()
+        if self.args.output_mode == "save" and not self.args.output_csv:
+            self._log_error("--output-csv is required for save mode")
+            raise SystemExit(1)
 
         # Load the model
         model = self._load_model()
@@ -124,9 +133,9 @@ class PredictCommand(BaseCommand):
 
     def _configure_logging(self):
         """Configure logging based on verbose/quiet flags."""
-        if getattr(self.args, 'quiet', False):
+        if getattr(self.args, "quiet", False):
             level = logging.ERROR
-        elif getattr(self.args, 'verbose', False):
+        elif getattr(self.args, "verbose", False):
             level = logging.DEBUG
         else:
             level = logging.INFO
@@ -139,7 +148,7 @@ class PredictCommand(BaseCommand):
 
     def _log_info(self, message: str):
         """Log info message unless quiet mode is enabled."""
-        if not getattr(self.args, 'quiet', False):
+        if not getattr(self.args, "quiet", False):
             print(message, file=sys.stderr)
 
     def _log_error(self, message: str):
@@ -152,8 +161,11 @@ class PredictCommand(BaseCommand):
 
         # Try modern format first
         try:
-            from neura_command.serialization import load_model
-            model = load_model(model_path)
+            from neura_command.inference import InferenceModel
+
+            model = InferenceModel.from_file(
+                model_path, device=getattr(self.args, "device", "cpu")
+            )
             self._log_info(f"Loaded model from {model_path}")
             return model
         except FileNotFoundError:
@@ -163,12 +175,19 @@ class PredictCommand(BaseCommand):
             return None
 
         # Try legacy pickle format
-        if model_path.endswith('.pkl') or Path(model_path + '.pkl').exists():
+        if model_path.endswith(".pkl") or Path(model_path + ".pkl").exists():
             try:
+                if getattr(self.args, "device", "cpu") != "cpu":
+                    raise ValueError(
+                        "Legacy models support CPU only; export a modern model for CUDA"
+                    )
                 from neura_command.deprecated.feed_forward_network.feed_forward_network_io import (
                     FeedForwardNetworkIO,
                 )
-                pkl_path = model_path if model_path.endswith('.pkl') else model_path + '.pkl'
+
+                pkl_path = (
+                    model_path if model_path.endswith(".pkl") else model_path + ".pkl"
+                )
                 model = FeedForwardNetworkIO.load_from_pickle(pkl_path)
                 self._log_info(f"Loaded model from {pkl_path} (legacy format)")
                 return model
@@ -182,8 +201,12 @@ class PredictCommand(BaseCommand):
     def _load_input_data(self) -> Optional[np.ndarray]:
         """Load input data from CSV file."""
         try:
-            data = np.loadtxt(self.args.input_csv, delimiter=",")
-            
+            data = np.loadtxt(
+                self.args.input_csv, delimiter=",", dtype=np.float32, ndmin=2
+            )
+            if data.size == 0 or not np.all(np.isfinite(data)):
+                raise ValueError("Input data must be non-empty and finite")
+
             # Ensure 2D: 1D array could be single sample with multiple features
             # or multiple samples with single feature. Default to multiple samples.
             if data.ndim == 1:
@@ -199,36 +222,43 @@ class PredictCommand(BaseCommand):
         """Make predictions using the model."""
         try:
             batch_size = self.args.batch_size
+            if batch_size is not None and batch_size < 1:
+                raise ValueError("batch_size must be positive")
 
             if batch_size is not None and len(input_data) > batch_size:
                 # Batch prediction for large datasets
                 self._log_info(f"Predicting in batches of {batch_size}...")
                 predictions = []
                 for i in range(0, len(input_data), batch_size):
-                    batch = input_data[i:i + batch_size]
+                    batch = input_data[i : i + batch_size]
                     batch_pred = np.asarray(model.predict(batch))
                     if batch_pred.ndim == 0:
                         batch_pred = batch_pred.reshape(1, 1)
                     elif batch_pred.ndim == 1:
                         batch_pred = batch_pred.reshape(-1, 1)
                     predictions.append(batch_pred)
-                    
-                    if getattr(self.args, 'verbose', False):
+
+                    if getattr(self.args, "verbose", False):
                         progress = min(i + batch_size, len(input_data))
-                        print(f"  Processed {progress}/{len(input_data)} samples", 
-                              file=sys.stderr)
+                        print(
+                            f"  Processed {progress}/{len(input_data)} samples",
+                            file=sys.stderr,
+                        )
 
                 predictions = np.concatenate(predictions, axis=0)
             else:
                 predictions = model.predict(input_data)
 
+            if predictions.size == 0 or not np.all(np.isfinite(predictions)):
+                raise ValueError("Predictions must be non-empty and finite")
             self._log_info(f"Generated predictions: shape {predictions.shape}")
             return predictions
 
         except Exception as e:
             self._log_error(f"Error making predictions: {e}")
-            if getattr(self.args, 'verbose', False):
+            if getattr(self.args, "verbose", False):
                 import traceback
+
                 traceback.print_exc()
             return None
 
@@ -264,20 +294,24 @@ class PredictCommand(BaseCommand):
                 # Multi-class: softmax-like output
                 result["predicted_classes"] = np.argmax(predictions, axis=1)
                 result["confidence"] = np.max(predictions, axis=1)
-                
+
                 # Top-K predictions
                 if self.args.top_k > 1:
                     k = min(self.args.top_k, predictions.shape[1])
-                    result["top_k_classes"] = np.argsort(predictions, axis=1)[:, -k:][:, ::-1]
-                    result["top_k_confidence"] = np.sort(predictions, axis=1)[:, -k:][:, ::-1]
+                    result["top_k_classes"] = np.argsort(predictions, axis=1)[:, -k:][
+                        :, ::-1
+                    ]
+                    result["top_k_confidence"] = np.sort(predictions, axis=1)[:, -k:][
+                        :, ::-1
+                    ]
             else:
                 # Binary classification
                 threshold = self.args.threshold
-                result["predicted_classes"] = (predictions >= threshold).astype(int).flatten()
+                result["predicted_classes"] = (
+                    (predictions >= threshold).astype(int).flatten()
+                )
                 result["confidence"] = np.where(
-                    predictions >= threshold,
-                    predictions,
-                    1 - predictions
+                    predictions >= threshold, predictions, 1 - predictions
                 ).flatten()
 
         return result
@@ -285,70 +319,93 @@ class PredictCommand(BaseCommand):
     def _display_predictions(self, output_data: dict, precision: int):
         """Display predictions to stdout."""
         predictions = output_data["predictions"]
-        
+
         if self.args.show_confidence and "predicted_classes" in output_data:
             print("\n" + "=" * 60)
             print("Predictions with Confidence")
             print("=" * 60)
-            
+
             classes = output_data["predicted_classes"]
             confidence = output_data["confidence"]
-            
+
             for i, (cls, conf) in enumerate(zip(classes, confidence)):
                 raw = predictions[i]
                 if predictions.shape[1] <= 4:
                     raw_str = ", ".join(f"{v:.{precision}f}" for v in raw)
-                    print(f"Sample {i + 1}: Class {cls} (confidence: {conf:.{precision}f}) | Raw: [{raw_str}]")
+                    print(
+                        f"Sample {i + 1}: Class {cls} (confidence: {conf:.{precision}f}) | Raw: [{raw_str}]"
+                    )
                 else:
-                    print(f"Sample {i + 1}: Class {cls} (confidence: {conf:.{precision}f})")
-            
+                    print(
+                        f"Sample {i + 1}: Class {cls} (confidence: {conf:.{precision}f})"
+                    )
+
             print("=" * 60)
         else:
             # Simple output
             print("Predictions:")
-            np.set_printoptions(precision=precision, suppress=True)
-            print(predictions)
+            with np.printoptions(precision=precision, suppress=True):
+                print(predictions)
 
     def _save_csv(self, output_data: dict, precision: int):
         """Save predictions to CSV file."""
         output_path = self.args.output_csv
         if not output_path:
-            self._log_error("Output CSV path is required for 'save' mode. Use --output-csv.")
-            return
+            self._log_error(
+                "Output CSV path is required for 'save' mode. Use --output-csv."
+            )
+            raise SystemExit(1)
 
         try:
             predictions = output_data["predictions"]
-            
-            fmt = f'%.{precision}f'
+
+            fmt = f"%.{precision}f"
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             np.savetxt(output_path, predictions, delimiter=",", fmt=fmt)
             self._log_info(f"Predictions saved to {output_path}")
 
             # Save additional info if confidence was requested
             if self.args.show_confidence and "predicted_classes" in output_data:
                 # Save classes and confidence alongside
-                classes_path = output_path.replace('.csv', '_classes.csv')
-                confidence_path = output_path.replace('.csv', '_confidence.csv')
-                
-                np.savetxt(classes_path, output_data["predicted_classes"].reshape(-1, 1), 
-                          delimiter=",", fmt='%d')
-                np.savetxt(confidence_path, output_data["confidence"].reshape(-1, 1),
-                          delimiter=",", fmt=fmt)
-                
+                base_path = Path(output_path)
+                classes_path = base_path.with_name(base_path.stem + "_classes.csv")
+                confidence_path = base_path.with_name(
+                    base_path.stem + "_confidence.csv"
+                )
+
+                np.savetxt(
+                    classes_path,
+                    output_data["predicted_classes"].reshape(-1, 1),
+                    delimiter=",",
+                    fmt="%d",
+                )
+                np.savetxt(
+                    confidence_path,
+                    output_data["confidence"].reshape(-1, 1),
+                    delimiter=",",
+                    fmt=fmt,
+                )
+
                 self._log_info(f"Classes saved to {classes_path}")
                 self._log_info(f"Confidence saved to {confidence_path}")
 
         except Exception as e:
             self._log_error(f"Error saving predictions to CSV: {e}")
+            raise SystemExit(1) from e
 
     def _save_json(self, output_data: dict, input_data: np.ndarray, precision: int):
         """Save predictions to JSON file."""
         output_path = self.args.output_json or self.args.output_csv
-        if output_path and not output_path.endswith('.json'):
-            output_path = output_path.replace('.csv', '.json') if '.csv' in output_path else output_path + '.json'
+        if (
+            output_path
+            and not output_path.endswith(".json")
+            and not self.args.output_json
+        ):
+            output_path = str(Path(output_path).with_suffix(".json"))
 
         try:
             predictions = output_data["predictions"]
-            
+
             result = {
                 "num_samples": len(predictions),
                 "predictions": predictions.tolist(),
@@ -357,10 +414,12 @@ class PredictCommand(BaseCommand):
             if self.args.show_confidence and "predicted_classes" in output_data:
                 result["predicted_classes"] = output_data["predicted_classes"].tolist()
                 result["confidence"] = output_data["confidence"].tolist()
-                
+
                 if "top_k_classes" in output_data:
                     result["top_k_classes"] = output_data["top_k_classes"].tolist()
-                    result["top_k_confidence"] = output_data["top_k_confidence"].tolist()
+                    result["top_k_confidence"] = output_data[
+                        "top_k_confidence"
+                    ].tolist()
 
             # Summary statistics
             result["summary"] = {
@@ -371,12 +430,14 @@ class PredictCommand(BaseCommand):
             }
 
             if output_path:
+                Path(output_path).parent.mkdir(parents=True, exist_ok=True)
                 with open(output_path, "w") as f:
-                    json.dump(result, f, indent=2)
+                    json.dump(result, f, indent=2, allow_nan=False)
                 self._log_info(f"Predictions saved to {output_path}")
             else:
                 # Print to stdout
-                print(json.dumps(result, indent=2))
+                print(json.dumps(result, indent=2, allow_nan=False))
 
         except Exception as e:
             self._log_error(f"Error saving predictions to JSON: {e}")
+            raise SystemExit(1) from e

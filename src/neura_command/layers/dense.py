@@ -2,12 +2,22 @@
 Dense (fully-connected) layer implementation.
 """
 
-from typing import List, Optional, Tuple, Literal
+from typing import List, Optional
 
 import numpy as np
 
-from neura_command.layers.base import Layer, ParameterMixin, DeviceType
-from neura_command.backend import get_backend, get_default_device, to_device
+from neura_command.layers.base import (
+    Layer,
+    ParameterMixin,
+    DeviceType,
+    positive_integer,
+)
+from neura_command.backend import (
+    get_backend,
+    get_default_device,
+    to_device,
+    normalize_device,
+)
 
 
 class Dense(Layer, ParameterMixin):
@@ -40,13 +50,17 @@ class Dense(Layer, ParameterMixin):
         weight_init: str = "he",
         device: DeviceType = None,
     ):
-        self.in_features = in_features
-        self.out_features = out_features
+        self.in_features = in_features = positive_integer(in_features, "in_features")
+        self.out_features = out_features = positive_integer(
+            out_features, "out_features"
+        )
         self.activation = activation
         self.use_bias = use_bias
 
         # Use default device if not specified
-        self._device = device if device is not None else get_default_device()
+        self._device = normalize_device(
+            device if device is not None else get_default_device()
+        )
         xp = get_backend(self._device)
 
         # Initialize weights
@@ -83,16 +97,19 @@ class Dense(Layer, ParameterMixin):
         Returns:
             Output of shape (batch_size, out_features)
         """
-        xp = get_backend(self._device)
+        if x.ndim != 2 or x.shape[1] != self.in_features:
+            raise ValueError(
+                f"Dense expects shape (batch, {self.in_features}); got {x.shape}. Use Flatten for higher-rank inputs."
+            )
         self._training = training
-        self._input_cache = x
+        self._input_cache = x if training else None
 
         # Linear transformation
         z = x @ self.weights
         if self.use_bias:
             z = z + self.bias
 
-        self._pre_activation_cache = z
+        self._pre_activation_cache = z if training else None
 
         # Apply activation if present
         if self.activation is not None:
@@ -109,11 +126,13 @@ class Dense(Layer, ParameterMixin):
             Gradient to pass to previous layer, shape (batch_size, in_features)
         """
         xp = get_backend(self._device)
+        if self._input_cache is None:
+            raise RuntimeError("Dense.backward requires a training forward pass")
         batch_size = grad.shape[0]
 
         # Gradient through activation
         if self.activation is not None:
-            grad = grad * self.activation.derivative(self._pre_activation_cache)
+            grad = self.activation.backward(self._pre_activation_cache, grad)
 
         # Gradient w.r.t. weights: input.T @ grad
         self._grad_weights = self._input_cache.T @ grad / batch_size
@@ -148,13 +167,15 @@ class Dense(Layer, ParameterMixin):
         Returns:
             self (for chaining)
         """
+        device = normalize_device(device)
+        get_backend(device)
         if device == self._device:
             return self
 
-        self._device = device
         self.weights = to_device(self.weights, device)
         if self.use_bias:
             self.bias = to_device(self.bias, device)
+        self._device = device
 
         # Clear caches
         self._input_cache = None

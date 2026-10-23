@@ -32,6 +32,7 @@ from neura_command.layers import (
     Dropout,
     BatchNorm,
     Flatten,
+    Input,
     Activation,
     ReLU,
     Sigmoid,
@@ -49,6 +50,8 @@ from neura_command.network_utils.optimizers import (
     Adam,
     RMSprop,
     AdaGrad,
+    Adadelta,
+    Nadam,
 )
 
 from neura_command.network_utils.loss_functions import (
@@ -84,6 +87,7 @@ from neura_command.backend import (
     is_cupy_available,
     to_device,
     to_numpy,
+    set_random_seed,
 )
 
 __all__ = [
@@ -95,6 +99,7 @@ __all__ = [
     "Dropout",
     "BatchNorm",
     "Flatten",
+    "Input",
     "Activation",
     "ReLU",
     "Sigmoid",
@@ -110,6 +115,8 @@ __all__ = [
     "Adam",
     "RMSprop",
     "AdaGrad",
+    "Adadelta",
+    "Nadam",
     # Losses
     "LossFunction",
     "MSELoss",
@@ -135,4 +142,5 @@ __all__ = [
     "is_cupy_available",
     "to_device",
     "to_numpy",
+    "set_random_seed",
 ]
