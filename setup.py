@@ -14,6 +14,10 @@ setup(
     ),
     package_dir={"": "src"},
     install_requires=["numpy>=1.20.0"],
+    extras_require={
+        "cuda12": ["cupy-cuda12x>=12"],
+        "cuda13": ["cupy-cuda13x>=14"],
+    },
     include_package_data=True,
     entry_points={
         "console_scripts": [

@@ -2,12 +2,17 @@
 Batch Normalization layer.
 """
 
-from typing import List, Optional, Literal
+from typing import List, Optional
 
 import numpy as np
 
 from neura_command.layers.base import Layer, ParameterMixin, DeviceType
-from neura_command.backend import get_backend, get_default_device, to_device
+from neura_command.backend import (
+    get_backend,
+    get_default_device,
+    to_device,
+    normalize_device,
+)
 
 
 class BatchNorm(Layer, ParameterMixin):
@@ -50,7 +55,9 @@ class BatchNorm(Layer, ParameterMixin):
         self.momentum = momentum
 
         # Use default device if not specified
-        self._device = device if device is not None else get_default_device()
+        self._device = normalize_device(
+            device if device is not None else get_default_device()
+        )
         xp = get_backend(self._device)
 
         # Learnable parameters
@@ -102,6 +109,10 @@ class BatchNorm(Layer, ParameterMixin):
             # Use running statistics for inference
             mean = self.running_mean
             var = self.running_var
+
+        if not training:
+            self._std = self._input_centered = self._input_normalized = None
+            return self.gamma * (x - mean) / xp.sqrt(var + self.epsilon) + self.beta
 
         # Normalize
         self._std = xp.sqrt(var + self.epsilon)
@@ -158,14 +169,16 @@ class BatchNorm(Layer, ParameterMixin):
 
     def to(self, device: DeviceType) -> "BatchNorm":
         """Move layer to specified device."""
+        device = normalize_device(device)
+        get_backend(device)
         if device == self._device:
             return self
 
-        self._device = device
         self.gamma = to_device(self.gamma, device)
         self.beta = to_device(self.beta, device)
         self.running_mean = to_device(self.running_mean, device)
         self.running_var = to_device(self.running_var, device)
+        self._device = device
 
         # Clear caches
         self._input_normalized = None

@@ -1,342 +1,359 @@
-"""
-Model quantization for NeuraCommand.
+"""Inference primitives and weight-only quantization for NumPy/CuPy.
 
-Supports:
-- float16: Half precision (50% memory reduction, minimal accuracy loss)
-- int8: 8-bit quantization (75% memory reduction, some accuracy trade-off)
-
-Usage:
-    from neura_command import Sequential, Dense
-    from neura_command.inference import quantize_model, QuantizationConfig
-    
-    model = Sequential([Dense(784, 128), Dense(128, 10)])
-    
-    # Quantize to float16
-    quantized = quantize_model(model, QuantizationConfig(dtype='float16'))
-    
-    # Quantize to int8 with calibration data
-    quantized = quantize_model(model, QuantizationConfig(dtype='int8'), calibration_data=X_sample)
+INT8 weights stay packed. Forward passes dequantize at most 32 output
+channels at a time; activations and accumulation use float32. This is not
+an integer-only runtime. The C exporter reads each packed weight directly.
 """
+
+from dataclasses import dataclass
+from typing import Literal, Union
 
 import numpy as np
-from dataclasses import dataclass, field
-from typing import Optional, Literal, List, Dict, Any
+
+from neura_command.backend import get_array_module, to_numpy, to_device
 
 
 @dataclass
 class QuantizationConfig:
-    """Configuration for model quantization.
+    """Weight storage precision and INT8 quantization granularity."""
 
-    Attributes:
-        dtype: Target data type ('float16' or 'int8')
-        symmetric: Use symmetric quantization for int8 (default: True)
-        per_channel: Quantize per output channel for better accuracy (default: False)
-    """
-
-    dtype: Literal["float16", "int8"] = "float16"
+    dtype: Literal["float32", "float16", "int8"] = "float16"
     symmetric: bool = True
     per_channel: bool = False
+
+    def __post_init__(self):
+        if self.dtype not in {"float32", "float16", "int8"}:
+            raise ValueError(f"Unsupported quantization dtype: {self.dtype}")
 
 
 @dataclass
 class Int8QuantizationParams:
-    """Parameters for int8 quantization of a single array."""
-
-    scale: float
-    zero_point: int
+    scale: Union[float, np.ndarray]
+    zero_point: Union[int, np.ndarray]
     min_val: float
     max_val: float
 
 
-def _compute_int8_params(
-    weights: np.ndarray, symmetric: bool = True
-) -> Int8QuantizationParams:
-    """Compute quantization parameters for int8 conversion.
-
-    Args:
-        weights: Array to quantize
-        symmetric: If True, zero_point is always 0 (simpler but less accurate)
-
-    Returns:
-        Quantization parameters
-    """
-    min_val = float(weights.min())
-    max_val = float(weights.max())
-
+def _compute_int8_params(weights, symmetric=True, per_channel=False):
+    weights = np.asarray(to_numpy(weights), dtype=np.float32)
+    if weights.size == 0 or not np.all(np.isfinite(weights)):
+        raise ValueError("Quantization requires non-empty, finite weights")
+    axis = 0 if per_channel else None
+    minimum = weights.min(axis=axis, keepdims=per_channel).astype(np.float64)
+    maximum = weights.max(axis=axis, keepdims=per_channel).astype(np.float64)
     if symmetric:
-        abs_max = max(abs(min_val), abs(max_val))
-        scale = abs_max / 127.0 if abs_max > 0 else 1.0
+        bound = np.maximum(np.abs(minimum), np.abs(maximum))
+        scale = np.maximum(
+            np.where(bound > 0, bound / 127.0, 1.0), np.finfo(np.float32).tiny
+        ).astype(np.float32)
         zero_point = 0
     else:
-        scale = (max_val - min_val) / 255.0 if max_val > min_val else 1.0
-        zero_point = int(round(-min_val / scale)) if scale > 0 else 0
-        zero_point = max(-128, min(127, zero_point))
-
+        # Include zero, including for constant or one-sided tensors.
+        minimum = np.minimum(minimum, 0)
+        maximum = np.maximum(maximum, 0)
+        span = maximum - minimum
+        scale = np.maximum(
+            np.where(span > 0, span / 255.0, 1.0), np.finfo(np.float32).tiny
+        ).astype(np.float32)
+        zero_point = np.clip(np.rint(-128 - minimum / scale), -128, 127).astype(
+            np.int32
+        )
+        zero_point = zero_point if per_channel else int(zero_point)
     return Int8QuantizationParams(
-        scale=scale, zero_point=zero_point, min_val=min_val, max_val=max_val
+        scale=scale if per_channel else float(scale),
+        zero_point=zero_point,
+        min_val=float(weights.min()),
+        max_val=float(weights.max()),
     )
 
 
-def _quantize_to_int8(
-    weights: np.ndarray, params: Int8QuantizationParams
-) -> np.ndarray:
-    """Quantize weights to int8."""
-    quantized = np.round(weights / params.scale) + params.zero_point
-    return np.clip(quantized, -128, 127).astype(np.int8)
+def _quantize_to_int8(weights, params):
+    return np.clip(
+        np.rint(weights / params.scale) + params.zero_point, -128, 127
+    ).astype(np.int8)
 
 
-def _dequantize_from_int8(
-    quantized: np.ndarray, params: Int8QuantizationParams
-) -> np.ndarray:
-    """Dequantize int8 weights back to float32."""
-    return (quantized.astype(np.float32) - params.zero_point) * params.scale
+def _dequantize_from_int8(quantized, params):
+    xp = get_array_module(quantized)
+    return (quantized.astype(xp.float32) - params.zero_point) * params.scale
 
 
 class QuantizedLayer:
-    """Base class for quantized layers."""
+    """Prediction-only primitive: no gradients, optimizer, or input caches."""
 
-    pass
+    def to(self, device):
+        for name, value in vars(self).items():
+            if hasattr(value, "shape"):
+                setattr(self, name, to_device(value, device))
+        for params in getattr(self, "quant_params", {}).values():
+            for name in ("scale", "zero_point"):
+                value = getattr(params, name)
+                if hasattr(value, "shape"):
+                    setattr(params, name, to_device(value, device))
+        return self
+
+    @property
+    def memory_bytes(self):
+        total = sum(
+            value.nbytes for value in vars(self).values() if hasattr(value, "nbytes")
+        )
+        for params in getattr(self, "quant_params", {}).values():
+            total += sum(
+                getattr(params, name).nbytes
+                if hasattr(getattr(params, name), "nbytes")
+                else 4
+                for name in ("scale", "zero_point")
+            )
+        return int(total)
+
+
+def _copy_parameter(value, dtype):
+    with np.errstate(over="ignore", invalid="ignore"):
+        result = np.array(to_numpy(value), dtype=dtype, copy=True)
+    if not np.all(np.isfinite(result)):
+        raise ValueError(
+            f"Parameters must be finite and representable as {np.dtype(dtype).name}"
+        )
+    return result
 
 
 class QuantizedDense(QuantizedLayer):
-    """Quantized Dense layer for inference.
+    """Packed weights with optional fused activation and bounded dequantization."""
 
-    Stores weights in quantized format and dequantizes during forward pass.
-    For int8, this provides ~75% memory reduction.
-    """
-
-    def __init__(
-        self,
-        weights: np.ndarray,
-        bias: Optional[np.ndarray],
-        dtype: str,
-        quant_params: Optional[Dict[str, Int8QuantizationParams]] = None,
-    ):
+    def __init__(self, weights, bias, dtype, quant_params=None, activation=None):
+        if dtype not in {"float32", "float16", "int8"}:
+            raise ValueError(f"Unsupported dtype: {dtype}")
         self.dtype = dtype
         self.use_bias = bias is not None
         self.quant_params = quant_params or {}
+        self.weights = _copy_parameter(weights, dtype)
+        bias_dtype = np.float16 if dtype == "float16" else np.float32
+        self.bias = _copy_parameter(bias, bias_dtype) if bias is not None else None
+        self.activation = activation
 
-        if dtype == "float16":
-            self.weights = weights.astype(np.float16)
-            self.bias = bias.astype(np.float16) if bias is not None else None
-        elif dtype == "int8":
-            self.weights = weights  # Already int8
-            self.bias = bias  # Bias usually kept at higher precision
+    def forward(self, x):
+        xp = get_array_module(x)
+        x = x.astype(xp.float32, copy=False)
+        if self.dtype == "int8":
+            params = self.quant_params["weights"]
+            width = self.weights.shape[1]
+            out = xp.empty(x.shape[:-1] + (width,), dtype=xp.float32)
+            for start in range(0, width, 32):
+                end = min(start + 32, width)
+                scale = (
+                    params.scale[..., start:end]
+                    if hasattr(params.scale, "shape")
+                    else params.scale
+                )
+                zero = (
+                    params.zero_point[..., start:end]
+                    if hasattr(params.zero_point, "shape")
+                    else params.zero_point
+                )
+                if hasattr(zero, "astype"):
+                    zero = zero.astype(xp.float32, copy=False)
+                block = (self.weights[:, start:end].astype(xp.float32) - zero) * scale
+                out[..., start:end] = x @ block
+        elif self.dtype == "float16":
+            # Accumulate in float32 to avoid half-precision overflow. Blocking
+            # also avoids an expanded full copy of the weight matrix.
+            width = self.weights.shape[1]
+            out = xp.empty(x.shape[:-1] + (width,), dtype=xp.float32)
+            for start in range(0, width, 32):
+                end = min(start + 32, width)
+                out[..., start:end] = x @ self.weights[:, start:end].astype(xp.float32)
         else:
-            raise ValueError(f"Unsupported dtype: {dtype}")
-
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass with quantized weights."""
-        if self.dtype == "float16":
-            # Convert input to float16, compute, convert back
-            x_fp16 = x.astype(np.float16)
-            out = x_fp16 @ self.weights
-            if self.bias is not None:
-                out += self.bias
-            return out.astype(np.float32)
-        elif self.dtype == "int8":
-            # Dequantize weights for computation
-            w_dequant = _dequantize_from_int8(
-                self.weights, self.quant_params["weights"]
-            )
-            out = x @ w_dequant
-            if self.bias is not None:
-                out += self.bias
-            return out
-        return x
+            out = x @ self.weights
+        if self.bias is not None:
+            out += self.bias
+        return self.activation.forward(out) if self.activation is not None else out
 
 
 class QuantizedActivation(QuantizedLayer):
-    """Quantized activation layer (no quantization needed, just the function)."""
-
-    def __init__(self, activation_type: str, alpha: Optional[float] = None):
+    def __init__(self, activation_type, alpha=None):
+        if activation_type not in {
+            "relu",
+            "sigmoid",
+            "softmax",
+            "tanh",
+            "leaky_relu",
+            "elu",
+            "linear",
+        }:
+            raise ValueError(f"Unsupported activation: {activation_type}")
         self.activation_type = activation_type
         self.alpha = alpha
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x):
+        xp = get_array_module(x)
         if self.activation_type == "relu":
-            return np.maximum(0, x)
-        elif self.activation_type == "sigmoid":
-            return 1 / (1 + np.exp(-np.clip(x, -500, 500)))
-        elif self.activation_type == "softmax":
-            exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
-            return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
-        elif self.activation_type == "tanh":
-            return np.tanh(x)
-        elif self.activation_type == "leaky_relu":
-            alpha = 0.01 if self.alpha is None else self.alpha
-            return np.where(x > 0, x, alpha * x)
-        elif self.activation_type == "elu":
-            alpha = 1.0 if self.alpha is None else self.alpha
-            return np.where(x > 0, x, alpha * (np.exp(x) - 1))
-        else:
-            return x
-
-
-class QuantizedDropout(QuantizedLayer):
-    """Quantized Dropout - always in eval mode (passthrough)."""
-
-    def forward(self, x: np.ndarray) -> np.ndarray:
+            return xp.maximum(0, x)
+        if self.activation_type == "sigmoid":
+            z = xp.exp(-xp.abs(x))
+            return xp.where(x >= 0, 1 / (1 + z), z / (1 + z))
+        if self.activation_type == "softmax":
+            exp_x = xp.exp(x - xp.max(x, axis=-1, keepdims=True))
+            return exp_x / xp.sum(exp_x, axis=-1, keepdims=True)
+        if self.activation_type == "tanh":
+            return xp.tanh(x)
+        if self.activation_type == "leaky_relu":
+            return xp.where(x > 0, x, (0.01 if self.alpha is None else self.alpha) * x)
+        if self.activation_type == "elu":
+            return xp.where(
+                x > 0,
+                x,
+                (1.0 if self.alpha is None else self.alpha)
+                * xp.expm1(xp.minimum(x, 0)),
+            )
         return x
 
 
-class QuantizedBatchNorm(QuantizedLayer):
-    """Quantized BatchNorm - uses running stats (eval mode only)."""
+class QuantizedDropout(QuantizedLayer):
+    """Identity retained for backward-compatible unoptimized exports."""
 
-    def __init__(
-        self,
-        gamma: np.ndarray,
-        beta: np.ndarray,
-        running_mean: np.ndarray,
-        running_var: np.ndarray,
-        eps: float,
-        dtype: str,
-    ):
+    def forward(self, x):
+        return x
+
+
+class QuantizedFlatten(QuantizedLayer):
+    def forward(self, x):
+        return x.reshape(x.shape[0], -1)
+
+
+class QuantizedBatchNorm(QuantizedLayer):
+    def __init__(self, gamma, beta, running_mean, running_var, eps, dtype):
         self.eps = eps
         self.dtype = dtype
+        storage = np.float16 if dtype == "float16" else np.float32
+        for name, value in (
+            ("gamma", gamma),
+            ("beta", beta),
+            ("running_mean", running_mean),
+            ("running_var", running_var),
+        ):
+            setattr(self, name, _copy_parameter(value, storage))
 
-        if dtype == "float16":
-            self.gamma = gamma.astype(np.float16)
-            self.beta = beta.astype(np.float16)
-            self.running_mean = running_mean.astype(np.float16)
-            self.running_var = running_var.astype(np.float16)
-        else:
-            self.gamma = gamma
-            self.beta = beta
-            self.running_mean = running_mean
-            self.running_var = running_var
+    def forward(self, x):
+        xp = get_array_module(x)
+        # Running statistics need float32 arithmetic even for FP16 storage.
+        return (
+            self.gamma.astype(xp.float32)
+            * (x - self.running_mean.astype(xp.float32))
+            / xp.sqrt(self.running_var.astype(xp.float32) + self.eps)
+            + self.beta
+        )
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        if self.dtype == "float16":
-            x_fp16 = x.astype(np.float16)
-            x_norm = (x_fp16 - self.running_mean) / np.sqrt(self.running_var + self.eps)
-            out = self.gamma * x_norm + self.beta
-            return out.astype(np.float32)
-        else:
-            x_norm = (x - self.running_mean) / np.sqrt(self.running_var + self.eps)
-            return self.gamma * x_norm + self.beta
+
+def _activation_for_inference(activation):
+    if activation is None:
+        return None
+    from neura_command.inference.runtime import _serialize_activation_function
+
+    config = _serialize_activation_function(activation)
+    if config["name"] == "linear":
+        return None
+    return QuantizedActivation(config["name"], config.get("alpha"))
 
 
 def quantize_model(
-    model,
-    config: QuantizationConfig,
-    calibration_data: Optional[np.ndarray] = None,
-) -> List[QuantizedLayer]:
-    """Quantize a Sequential model for inference.
+    model, config, calibration_data=None, *, optimize=False, prune_threshold=0.0
+):
+    """Copy a training model into prediction-only primitives on CPU.
 
-    Args:
-        model: Sequential model to quantize
-        config: Quantization configuration
-        calibration_data: Sample data for int8 calibration (optional)
-
-    Returns:
-        List of quantized layers for InferenceModel
-
-    Example:
-        quantized_layers = quantize_model(model, QuantizationConfig(dtype='float16'))
-        inference_model = InferenceModel(quantized_layers)
+    INT8 is weight-only: calibration data is unnecessary and is accepted for
+    compatibility. Set optimize=True to fold normalization, remove identities,
+    and compact unused hidden channels. Nonzero pruning is lossy and opt-in.
     """
-    from neura_command.layers import Dense, Dropout, BatchNorm
-    from neura_command.layers.activation import (
-        ReLU,
-        Sigmoid,
-        Softmax,
-        Tanh,
-        LeakyReLU,
-        ELU,
+    from neura_command.layers import (
+        Dense,
+        Dropout,
+        BatchNorm,
+        Activation,
+        Flatten,
+        Input,
     )
 
-    quantized_layers = []
-
+    layers = []
     for layer in model.layers:
         if isinstance(layer, Dense):
-            weights = layer.weights.copy()
-            bias = layer.bias.copy() if layer.use_bias else None
-
-            if config.dtype == "float16":
-                qlayer = QuantizedDense(weights, bias, dtype="float16")
-            elif config.dtype == "int8":
-                # Compute quantization params
-                w_params = _compute_int8_params(weights, symmetric=config.symmetric)
-                q_weights = _quantize_to_int8(weights, w_params)
-                # Keep bias in float32 for accuracy
-                qlayer = QuantizedDense(
-                    q_weights, bias, dtype="int8", quant_params={"weights": w_params}
+            layers.append(
+                QuantizedDense(
+                    layer.weights,
+                    layer.bias if layer.use_bias else None,
+                    "float32",
+                    activation=_activation_for_inference(layer.activation),
                 )
-            quantized_layers.append(qlayer)
-
-        elif isinstance(layer, Dropout):
-            quantized_layers.append(QuantizedDropout())
-
+            )
         elif isinstance(layer, BatchNorm):
-            qlayer = QuantizedBatchNorm(
-                gamma=layer.gamma.copy(),
-                beta=layer.beta.copy(),
-                running_mean=layer.running_mean.copy(),
-                running_var=layer.running_var.copy(),
-                eps=layer.epsilon,
-                dtype=config.dtype,
+            layers.append(
+                QuantizedBatchNorm(
+                    layer.gamma,
+                    layer.beta,
+                    layer.running_mean,
+                    layer.running_var,
+                    layer.epsilon,
+                    "float32",
+                )
             )
-            quantized_layers.append(qlayer)
-
-        elif isinstance(layer, ReLU):
-            quantized_layers.append(QuantizedActivation("relu"))
-        elif isinstance(layer, Sigmoid):
-            quantized_layers.append(QuantizedActivation("sigmoid"))
-        elif isinstance(layer, Softmax):
-            quantized_layers.append(QuantizedActivation("softmax"))
-        elif isinstance(layer, Tanh):
-            quantized_layers.append(QuantizedActivation("tanh"))
-        elif isinstance(layer, LeakyReLU):
-            quantized_layers.append(
-                QuantizedActivation("leaky_relu", alpha=layer.activation.alpha)
+        elif isinstance(layer, Activation):
+            layers.append(
+                _activation_for_inference(layer.activation) or QuantizedDropout()
             )
-        elif isinstance(layer, ELU):
-            quantized_layers.append(
-                QuantizedActivation("elu", alpha=layer.activation.alpha)
-            )
+        elif isinstance(layer, Flatten):
+            layers.append(QuantizedFlatten())
+        elif isinstance(layer, (Input, Dropout)):
+            layers.append(QuantizedDropout())
         else:
-            raise ValueError(f"Cannot quantize layer type: {type(layer).__name__}")
+            raise ValueError(f"Cannot export layer type: {type(layer).__name__}")
+    if optimize:
+        from neura_command.inference.optimization import optimize_layers
 
-    return quantized_layers
+        layers = optimize_layers(layers, prune_threshold=prune_threshold)
+    elif prune_threshold != 0:
+        raise ValueError("Pruning requires optimize=True")
+
+    for i, layer in enumerate(layers):
+        if isinstance(layer, QuantizedDense):
+            if config.dtype == "int8":
+                params = _compute_int8_params(
+                    layer.weights, config.symmetric, config.per_channel
+                )
+                weights = _quantize_to_int8(layer.weights, params)
+                layers[i] = QuantizedDense(
+                    weights, layer.bias, "int8", {"weights": params}, layer.activation
+                )
+            else:
+                layers[i] = QuantizedDense(
+                    layer.weights, layer.bias, config.dtype, activation=layer.activation
+                )
+        elif isinstance(layer, QuantizedBatchNorm):
+            layers[i] = QuantizedBatchNorm(
+                layer.gamma,
+                layer.beta,
+                layer.running_mean,
+                layer.running_var,
+                layer.eps,
+                config.dtype,
+            )
+    return layers
 
 
-def get_quantization_stats(
-    model, quantized_layers: List[QuantizedLayer]
-) -> Dict[str, Any]:
-    """Get statistics about quantization.
-
-    Args:
-        model: Original Sequential model
-        quantized_layers: Quantized layers
-
-    Returns:
-        Dict with memory usage, compression ratio, etc.
-    """
-    from neura_command.layers import Dense
-
-    original_bytes = 0
-    quantized_bytes = 0
-
-    for orig_layer, q_layer in zip(model.layers, quantized_layers):
-        if isinstance(orig_layer, Dense):
-            # Original size (float32 = 4 bytes)
-            original_bytes += orig_layer.weights.nbytes
-            if orig_layer.use_bias:
-                original_bytes += orig_layer.bias.nbytes
-
-            # Quantized size
-            quantized_bytes += q_layer.weights.nbytes
-            if q_layer.bias is not None:
-                quantized_bytes += q_layer.bias.nbytes
-
+def get_quantization_stats(model, quantized_layers):
+    original_bytes = sum(
+        value.nbytes
+        for layer in model.layers
+        for name, value in vars(layer).items()
+        if name in {"weights", "bias", "gamma", "beta", "running_mean", "running_var"}
+        and value is not None
+    )
+    quantized_bytes = sum(layer.memory_bytes for layer in quantized_layers)
     return {
         "original_bytes": original_bytes,
         "quantized_bytes": quantized_bytes,
-        "compression_ratio": (
-            original_bytes / quantized_bytes if quantized_bytes > 0 else 1.0
-        ),
-        "memory_saved_percent": (
-            (1 - quantized_bytes / original_bytes) * 100 if original_bytes > 0 else 0
-        ),
+        "compression_ratio": original_bytes / quantized_bytes
+        if quantized_bytes
+        else 1.0,
+        "memory_saved_percent": (1 - quantized_bytes / original_bytes) * 100
+        if original_bytes
+        else 0,
     }

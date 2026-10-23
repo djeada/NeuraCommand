@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Optional
 
 import numpy as np
+
+from neura_command.backend import get_array_module, to_device
 
 
 class Optimizer(ABC):
@@ -60,6 +62,17 @@ class Optimizer(ABC):
                     # Update in-place
                     param[...] = updated
 
+    def to(self, device, parameter_ids) -> None:
+        """Move moments and remap their keys when parameter arrays move devices."""
+        for state in vars(self).values():
+            if isinstance(state, dict):
+                moved = {
+                    parameter_ids.get(key, key): to_device(value, device)
+                    for key, value in state.items()
+                }
+                state.clear()
+                state.update(moved)
+
 
 class SGD(Optimizer):
     """Stochastic Gradient Descent optimizer with optional momentum.
@@ -96,16 +109,17 @@ class SGD(Optimizer):
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
     ) -> np.ndarray:
         # Apply L2 weight decay
+        xp = get_array_module(weights)
         if self.weight_decay > 0:
             gradient = gradient + self.weight_decay * weights
 
         # Apply L1 regularization (subgradient)
         if self.l1_regularization > 0:
-            gradient = gradient + self.l1_regularization * np.sign(weights)
+            gradient = gradient + self.l1_regularization * xp.sign(weights)
 
         if self.momentum > 0:
             if param_id not in self._velocity:
-                self._velocity[param_id] = np.zeros_like(weights)
+                self._velocity[param_id] = xp.zeros_like(weights)
 
             v = self._velocity[param_id]
             v = self.momentum * v - self._learning_rate * gradient
@@ -163,9 +177,10 @@ class Adam(Optimizer):
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
     ) -> np.ndarray:
         # Initialize state for this parameter if needed
+        xp = get_array_module(weights)
         if param_id not in self._m:
-            self._m[param_id] = np.zeros_like(weights)
-            self._v[param_id] = np.zeros_like(weights)
+            self._m[param_id] = xp.zeros_like(weights)
+            self._v[param_id] = xp.zeros_like(weights)
 
         step_t = self._current_step_t
         if step_t is None:
@@ -192,7 +207,7 @@ class Adam(Optimizer):
             weights = weights - self._learning_rate * self.weight_decay * weights
 
         # Update weights
-        return weights - self._learning_rate * m_hat / (np.sqrt(v_hat) + self.epsilon)
+        return weights - self._learning_rate * m_hat / (xp.sqrt(v_hat) + self.epsilon)
 
     def step(self, layers) -> None:
         """Update all parameters, incrementing timestep once."""
@@ -241,8 +256,9 @@ class RMSprop(Optimizer):
     def update(
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
     ) -> np.ndarray:
+        xp = get_array_module(weights)
         if param_id not in self._avg_sq_grad:
-            self._avg_sq_grad[param_id] = np.zeros_like(weights)
+            self._avg_sq_grad[param_id] = xp.zeros_like(weights)
 
         # Apply weight decay
         if self.weight_decay > 0:
@@ -254,7 +270,7 @@ class RMSprop(Optimizer):
         self._avg_sq_grad[param_id] = avg
 
         # Update weights
-        return weights - self._learning_rate * gradient / (np.sqrt(avg) + self.epsilon)
+        return weights - self._learning_rate * gradient / (xp.sqrt(avg) + self.epsilon)
 
     def reset(self) -> None:
         self._avg_sq_grad = {}
@@ -285,14 +301,15 @@ class AdaGrad(Optimizer):
     def update(
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
     ) -> np.ndarray:
+        xp = get_array_module(weights)
         if param_id not in self._accumulated_grad:
-            self._accumulated_grad[param_id] = np.zeros_like(weights)
+            self._accumulated_grad[param_id] = xp.zeros_like(weights)
 
         acc = self._accumulated_grad[param_id]
         acc = acc + gradient**2
         self._accumulated_grad[param_id] = acc
 
-        return weights - self._learning_rate * gradient / (np.sqrt(acc) + self.epsilon)
+        return weights - self._learning_rate * gradient / (xp.sqrt(acc) + self.epsilon)
 
     def reset(self) -> None:
         self._accumulated_grad = {}
@@ -336,9 +353,10 @@ class Adadelta(Optimizer):
     def update(
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
     ) -> np.ndarray:
+        xp = get_array_module(weights)
         if param_id not in self._avg_sq_grad:
-            self._avg_sq_grad[param_id] = np.zeros_like(weights)
-            self._avg_sq_delta[param_id] = np.zeros_like(weights)
+            self._avg_sq_grad[param_id] = xp.zeros_like(weights)
+            self._avg_sq_delta[param_id] = xp.zeros_like(weights)
 
         # Apply weight decay
         if self.weight_decay > 0:
@@ -352,8 +370,8 @@ class Adadelta(Optimizer):
         self._avg_sq_grad[param_id] = avg_sq_grad
 
         # Compute parameter update using RMS of previous updates
-        rms_delta = np.sqrt(avg_sq_delta + self.epsilon)
-        rms_grad = np.sqrt(avg_sq_grad + self.epsilon)
+        rms_delta = xp.sqrt(avg_sq_delta + self.epsilon)
+        rms_grad = xp.sqrt(avg_sq_grad + self.epsilon)
         delta = -rms_delta / rms_grad * gradient
 
         # Update running average of squared parameter updates
@@ -409,9 +427,10 @@ class Nadam(Optimizer):
         self, param_id: int, weights: np.ndarray, gradient: np.ndarray
     ) -> np.ndarray:
         # Initialize state for this parameter if needed
+        xp = get_array_module(weights)
         if param_id not in self._m:
-            self._m[param_id] = np.zeros_like(weights)
-            self._v[param_id] = np.zeros_like(weights)
+            self._m[param_id] = xp.zeros_like(weights)
+            self._v[param_id] = xp.zeros_like(weights)
 
         step_t = self._current_step_t
         if step_t is None:
@@ -443,7 +462,9 @@ class Nadam(Optimizer):
             weights = weights - self._learning_rate * self.weight_decay * weights
 
         # Update weights with Nesterov momentum
-        return weights - self._learning_rate * m_nesterov / (np.sqrt(v_hat) + self.epsilon)
+        return weights - self._learning_rate * m_nesterov / (
+            xp.sqrt(v_hat) + self.epsilon
+        )
 
     def step(self, layers) -> None:
         """Update all parameters, incrementing timestep once."""

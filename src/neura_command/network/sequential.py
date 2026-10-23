@@ -4,7 +4,7 @@ Sequential neural network model.
 The main high-level API for building and training neural networks.
 """
 
-from typing import List, Optional, Dict, Any, Callable, Tuple, Union, Literal
+from typing import List, Optional, Dict, Any, Tuple
 
 import numpy as np
 
@@ -12,7 +12,14 @@ from neura_command.layers.base import Layer, DeviceType
 from neura_command.network_utils.optimizers import Optimizer, Adam
 from neura_command.network_utils.loss_functions import LossFunction, MSELoss
 from neura_command.network_utils.callbacks import Callback, HistoryCallback
-from neura_command.backend import get_backend, get_default_device, to_device, to_numpy
+from neura_command.backend import (
+    get_backend,
+    get_default_device,
+    to_device,
+    to_numpy,
+    normalize_device,
+    get_array_module,
+)
 
 import logging
 
@@ -69,14 +76,10 @@ class Sequential:
         self.optimizer: Optimizer = optimizer if optimizer is not None else Adam()
         self.loss: LossFunction = loss if loss is not None else MSELoss()
         self._training: bool = True
-        self._device: DeviceType = (
+        self._device: DeviceType = normalize_device(
             device if device is not None else get_default_device()
         )
-
-        # Move all layers to the specified device
-        if device is not None:
-            for layer in self.layers:
-                layer.to(device)
+        self.to(self._device)
 
     @property
     def device(self) -> DeviceType:
@@ -96,9 +99,16 @@ class Sequential:
             model = Sequential([Dense(10, 5)])
             model.to('cuda')  # Move to GPU
         """
-        self._device = device
+        device = normalize_device(device)
+        get_backend(device)  # Validate before changing model state.
+        old_params = [param for layer in self.layers for param in layer.parameters()]
         for layer in self.layers:
             layer.to(device)
+        new_params = [param for layer in self.layers for param in layer.parameters()]
+        self.optimizer.to(
+            device, {id(old): id(new) for old, new in zip(old_params, new_params)}
+        )
+        self._device = device
         return self
 
     def add(self, layer: Layer) -> "Sequential":
@@ -126,6 +136,7 @@ class Sequential:
         """
         # Move input to device if needed
         x = to_device(x, self._device)
+        x = x.astype(get_backend(self._device).float32, copy=False)
 
         for layer in self.layers:
             x = layer.forward(x, training=training)
@@ -197,14 +208,17 @@ class Sequential:
         for i in range(0, n_samples, batch_size):
             X_batch = X[i : i + batch_size]
             y_batch = y[i : i + batch_size]
-            y_pred = self.predict(X_batch)
-            batch_loss = self._loss_to_float(self.compute_loss(y_batch, y_pred))
+            y_pred = self.forward(X_batch, training=False)
+            batch_loss = self.compute_loss(
+                to_device(y_batch, self._device).astype(y_pred.dtype, copy=False),
+                y_pred,
+            )
             total_loss += batch_loss * len(X_batch)
 
         if was_training:
             self.train_mode()
 
-        return total_loss / n_samples
+        return self._loss_to_float(total_loss / n_samples)
 
     def train(
         self,
@@ -232,10 +246,15 @@ class Sequential:
         Returns:
             Dictionary containing training history
         """
+        self._validate_data(X, y, batch_size)
+        if epochs < 1:
+            raise ValueError("epochs must be positive")
+        if validation_data is not None:
+            self._validate_data(*validation_data, batch_size)
         self.train_mode()
 
         # Setup callbacks
-        callbacks = callbacks or []
+        callbacks = list(callbacks or [])
         history = HistoryCallback()
         callbacks.append(history)
 
@@ -254,11 +273,8 @@ class Sequential:
             # Shuffle data
             if shuffle:
                 indices = np.random.permutation(n_samples)
-                X_shuffled = X[indices]
-                y_shuffled = y[indices]
             else:
-                X_shuffled = X
-                y_shuffled = y
+                indices = None
 
             epoch_loss = 0.0
 
@@ -266,18 +282,30 @@ class Sequential:
                 start = batch_idx * batch_size
                 end = min(start + batch_size, n_samples)
 
-                X_batch = X_shuffled[start:end]
-                y_batch = y_shuffled[start:end]
+                selection = slice(start, end) if indices is None else indices[start:end]
+                # Only gather a batch; avoid a second full dataset each epoch.
+                X_batch = X[
+                    selection
+                    if get_array_module(X) is np or indices is None
+                    else get_array_module(X).asarray(selection)
+                ]
+                y_batch = y[
+                    selection
+                    if get_array_module(y) is np or indices is None
+                    else get_array_module(y).asarray(selection)
+                ]
 
                 # Forward pass (automatically moves X to device)
                 y_pred = self.forward(X_batch, training=True)
 
                 # Move y_batch to device for loss computation
-                y_batch_device = to_device(y_batch, self._device)
+                y_batch_device = to_device(y_batch, self._device).astype(
+                    y_pred.dtype, copy=False
+                )
 
                 # Compute loss
                 batch_loss = self.compute_loss(y_batch_device, y_pred)
-                epoch_loss += self._loss_to_float(batch_loss) * len(X_batch)
+                epoch_loss += batch_loss * len(X_batch)
 
                 # Backward pass
                 grad = self.compute_loss_gradient(y_batch_device, y_pred)
@@ -286,7 +314,7 @@ class Sequential:
                 # Update weights
                 self.optimizer.step(self.layers)
 
-            epoch_loss /= n_samples
+            epoch_loss = self._loss_to_float(epoch_loss / n_samples)
 
             # Compute validation loss
             logs = {"loss": epoch_loss, "epoch": epoch}
@@ -335,8 +363,18 @@ class Sequential:
         Returns:
             Dictionary with 'loss' and optionally other metrics
         """
+        self._validate_data(X, y, batch_size)
         self.eval_mode()
         return {"loss": self._average_loss(X, y, batch_size=batch_size)}
+
+    @staticmethod
+    def _validate_data(X, y, batch_size):
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        if len(X) == 0 or len(X) != len(y):
+            raise ValueError(
+                "Features and targets must have matching, non-empty batches"
+            )
 
     def summary(self) -> str:
         """Return a summary of the model architecture.

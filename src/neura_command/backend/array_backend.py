@@ -12,7 +12,7 @@ Design goals:
 """
 
 import threading
-from typing import Literal, Union, Any
+from typing import Literal, Any
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,7 +22,7 @@ try:
     import cupy as cp
 
     CUPY_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     cp = None
     CUPY_AVAILABLE = False
 
@@ -56,8 +56,7 @@ def is_cupy_available() -> bool:
         return False
     try:
         # Check if CUDA is actually available
-        cp.cuda.runtime.getDeviceCount()
-        return True
+        return cp.cuda.runtime.getDeviceCount() > 0
     except Exception:
         return False
 
@@ -84,21 +83,18 @@ def set_default_device(device: DeviceType) -> None:
         set_default_device('cuda')
         model = Sequential([...])  # Will use GPU
     """
-    global _global_default_device
-
-    device = _normalize_device(device)
+    device = normalize_device(device)
 
     if device == "cuda" and not is_cupy_available():
         raise ValueError(
-            "Cannot set device to 'cuda': CuPy is not available. "
-            "Install with: pip install cupy-cuda11x (or appropriate version)"
+            "Cannot set device to 'cuda': no usable CUDA device. "
+            "Install a CuPy build matching your CUDA runtime and check the driver."
         )
 
     _thread_local.device = device
-    _global_default_device = device
 
 
-def _normalize_device(device: DeviceType) -> DeviceType:
+def normalize_device(device: DeviceType) -> DeviceType:
     """Normalize device name ('gpu' -> 'cuda')."""
     if device == "gpu":
         return "cuda"
@@ -126,12 +122,13 @@ def get_backend(device: DeviceType = None) -> Any:
     if device is None:
         device = get_default_device()
     else:
-        device = _normalize_device(device)
+        device = normalize_device(device)
 
     if device == "cuda":
         if not is_cupy_available():
             raise ValueError(
-                "CuPy is not available. Install with: pip install cupy-cuda11x"
+                "No usable CUDA device. Install a CuPy build matching your CUDA "
+                "runtime and check the driver. Use device='cpu' for NumPy."
             )
         return cp
 
@@ -172,7 +169,7 @@ def to_device(array, device: DeviceType) -> Any:
         x_gpu = to_device(x_cpu, 'cuda')
         x_cpu = to_device(x_gpu, 'cpu')
     """
-    device = _normalize_device(device)
+    device = normalize_device(device)
 
     if device == "cpu":
         return to_numpy(array)
@@ -181,11 +178,7 @@ def to_device(array, device: DeviceType) -> Any:
     if not is_cupy_available():
         raise ValueError("CuPy is not available for GPU transfer")
 
-    if isinstance(array, np.ndarray):
-        return cp.asarray(array)
-
-    # Already a CuPy array
-    return array
+    return cp.asarray(array)
 
 
 def to_numpy(array) -> np.ndarray:
@@ -234,7 +227,7 @@ class DeviceContext:
     """
 
     def __init__(self, device: DeviceType):
-        self.device = _normalize_device(device)
+        self.device = normalize_device(device)
         self.previous_device = None
 
     def __enter__(self):

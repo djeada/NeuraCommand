@@ -6,15 +6,15 @@ CPU/GPU execution. CuPy is optional - falls back to NumPy if not installed.
 
 Usage:
     from neura_command.backend import get_backend, set_default_device
-    
+
     # Get backend for specific device
     xp = get_backend('cuda')  # Returns cupy if available, else raises
     xp = get_backend('cpu')   # Returns numpy
-    
+
     # Set default device
     set_default_device('cuda')
     xp = get_backend()  # Uses default
-    
+
     # Use like numpy
     x = xp.array([1, 2, 3])
     y = xp.dot(x, x)
@@ -29,6 +29,8 @@ from neura_command.backend.array_backend import (
     to_numpy,
     is_cupy_available,
     Backend,
+    normalize_device,
+    DeviceContext,
 )
 
 __all__ = [
@@ -40,4 +42,6 @@ __all__ = [
     "to_numpy",
     "is_cupy_available",
     "Backend",
+    "normalize_device",
+    "DeviceContext",
 ]

@@ -6,6 +6,10 @@ NeuraCommand is a Python package and CLI tool designed for streamlined creation,
 
 ## Features
 
+- **Embedded C99 Export**: Export float32 or packed INT8 networks with constant weights, caller-owned scratch RAM, and enforceable parameter/RAM budgets. Export folds eligible BatchNorm layers and compacts unused hidden channels.
+
+- **CPU and CUDA Training/Inference**: NumPy is the only required dependency. Optional CuPy enables GPU training and inference through the Python API and `--device cpu|cuda|gpu` CLI options.
+
 - **Flexible Network Creation Library**: A library built on top of numpy, providing the flexibility to create various network configurations easily.
 
 - **Intuitive Command-Line Interface (CLI)**: A user-friendly CLI that simplifies neural network operations, enhancing accessibility for usage in different programming languages or embedded systems.
@@ -114,6 +118,60 @@ Use `export` to save an inference-only artifact for deployment. Exported inferen
 ```shell
 neura_command export --model path/to/model --output path/to/inference_model --quantize float16
 ```
+
+For an embedded target without Python, export C99 with INT8 weight storage:
+
+```shell
+neura_command export --model path/to/model --output firmware/model \
+  --format c --quantize int8 --per-channel \
+  --max-weight-bytes 16384 --max-scratch-bytes 2048
+```
+
+This writes `model.c`, `model.h`, and `model.report.json`. The generated function uses float32 inputs, outputs, and accumulation, reads packed weights directly, and performs no dynamic allocation. Budgets cover constant parameter arrays and the declared scratch buffer; code, alignment, the C math library, input/output arrays, and scalar stack overhead are additional. C99 export supports float32 and INT8 storage; float16 storage is available in the Python runtime.
+
+Optimization is enabled by default in the export command. `--no-optimize` disables it. `--prune-threshold 0.001` additionally removes hidden channels with small outgoing weights; a nonzero threshold is lossy and must be checked against held-out data. INT8 quantization also requires accuracy validation. [Embedded deployment details](docs/embedded.md) cover the C API, memory reports, and a runnable example.
+
+Exported JSON+NPZ artifacts can be used directly by `predict`:
+
+```shell
+neura_command predict --model path/to/inference_model --input-csv inputs.csv --device cpu
+```
+
+### CPU and GPU execution
+
+CPU execution is the default. From a checkout, install one GPU extra matching your CUDA toolkit and driver:
+
+```shell
+python -m pip install -e ".[cuda12]"
+# For CUDA 13, use: python -m pip install -e ".[cuda13]"
+```
+
+CuPy remains optional. Follow the [CuPy installation guide](https://docs.cupy.dev/en/stable/install.html) for driver/toolkit requirements; install one CuPy distribution in an environment.
+
+```shell
+neura_command train --model model --features-csv features.csv --targets-csv targets.csv \
+  --device cuda --epochs 50 --batch-size 32 --output trained
+neura_command predict --model trained --input-csv inputs.csv --device cuda
+```
+
+`create` also accepts `--device`. `gpu` is an alias for `cuda`; selecting CUDA without a usable GPU raises an error. Legacy pickle models support CPU execution only.
+
+```python
+model.to("cuda")                  # Moves parameters and existing optimizer moments
+model.train(X, y, epochs=10)       # Accepts NumPy or CuPy arrays
+predictions = model.predict(X)    # Returns a NumPy array on CPU
+model.to("cpu")                   # Continue training or predicting on CPU
+model.save("trained")             # Portable JSON+NPZ, including from a GPU model
+
+from neura_command import InferenceModel
+lean = InferenceModel.from_sequential(
+    model, quantize="int8", per_channel=True, optimize=True
+)
+lean.save("deployment")
+gpu_inference = InferenceModel.load("deployment", device="cuda")
+```
+
+Inference snapshots own their parameters and contain no training caches or gradients. Python inference defaults to CPU regardless of the source model's device. INT8 is weight-only quantization with float32 computation, and Python float16 exports also accumulate in float32. The Python API keeps `optimize=False` by default for compatibility; enable it explicitly for compact deployment.
 
 ### Analyze
 

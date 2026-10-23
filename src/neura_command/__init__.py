@@ -32,6 +32,7 @@ from neura_command.layers import (
     Dropout,
     BatchNorm,
     Flatten,
+    Input,
     Activation,
     ReLU,
     Sigmoid,
@@ -49,6 +50,8 @@ from neura_command.network_utils.optimizers import (
     Adam,
     RMSprop,
     AdaGrad,
+    Adadelta,
+    Nadam,
 )
 
 from neura_command.network_utils.loss_functions import (
@@ -95,6 +98,7 @@ __all__ = [
     "Dropout",
     "BatchNorm",
     "Flatten",
+    "Input",
     "Activation",
     "ReLU",
     "Sigmoid",
@@ -110,6 +114,8 @@ __all__ = [
     "Adam",
     "RMSprop",
     "AdaGrad",
+    "Adadelta",
+    "Nadam",
     # Losses
     "LossFunction",
     "MSELoss",

@@ -21,6 +21,8 @@ class TrainNetworkCommand(BaseCommand):
 
     @staticmethod
     def add_arguments(parser):
+        parser.add_argument("--device", choices=["cpu", "cuda", "gpu"], default="cpu",
+                            help="Training device (CUDA requires optional CuPy and a working GPU).")
         # Model paths
         parser.add_argument(
             "--model",
@@ -160,6 +162,8 @@ class TrainNetworkCommand(BaseCommand):
         history = self._train_model(
             model, train_features, train_targets, val_features, val_targets, callbacks
         )
+        if history is None:
+            sys.exit(1)
 
         # Save training history if requested
         if self.args.save_history:
@@ -203,7 +207,7 @@ class TrainNetworkCommand(BaseCommand):
         # Try modern format first
         try:
             from neura_command.serialization import load_model
-            model = load_model(model_path)
+            model = load_model(model_path, device=getattr(self.args, "device", "cpu"))
             self._log_info(f"Loaded model from {model_path} (modern format)")
             self._model_format = "modern"
             return model
@@ -216,6 +220,8 @@ class TrainNetworkCommand(BaseCommand):
         # Try legacy pickle format
         if model_path.endswith('.pkl') or Path(model_path + '.pkl').exists():
             try:
+                if getattr(self.args, "device", "cpu") != "cpu":
+                    raise ValueError("Legacy models support CPU only; create a modern model for CUDA")
                 from neura_command.deprecated.feed_forward_network.feed_forward_network_io import (
                     FeedForwardNetworkIO,
                 )
@@ -245,14 +251,14 @@ class TrainNetworkCommand(BaseCommand):
     def _load_training_data(self):
         """Load training features and targets from CSV files."""
         try:
-            features = np.loadtxt(self.args.features_csv, delimiter=",")
+            features = np.loadtxt(self.args.features_csv, delimiter=",", dtype=np.float32, ndmin=2)
             self._log_info(f"Loaded features: shape {features.shape}")
         except Exception as e:
             self._log_error(f"Error loading features: {e}")
             return None, None
 
         try:
-            targets = np.loadtxt(self.args.targets_csv, delimiter=",")
+            targets = np.loadtxt(self.args.targets_csv, delimiter=",", dtype=np.float32, ndmin=2)
             self._log_info(f"Loaded targets: shape {targets.shape}")
         except Exception as e:
             self._log_error(f"Error loading targets: {e}")
@@ -479,3 +485,4 @@ class TrainNetworkCommand(BaseCommand):
             self._log_info(f"Model saved to {output_path}")
         except Exception as e:
             self._log_error(f"Error saving model: {e}")
+            raise SystemExit(1) from e

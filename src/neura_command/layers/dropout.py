@@ -2,12 +2,10 @@
 Dropout layer for regularization.
 """
 
-from typing import List, Literal
-
 import numpy as np
 
 from neura_command.layers.base import Layer, DeviceType
-from neura_command.backend import get_backend, get_default_device
+from neura_command.backend import get_backend, get_default_device, normalize_device
 
 
 class Dropout(Layer):
@@ -34,7 +32,10 @@ class Dropout(Layer):
             raise ValueError(f"Dropout rate must be in [0, 1), got {rate}")
         self.rate = rate
         self._mask = None
-        self._device = device if device is not None else get_default_device()
+        self._device = normalize_device(
+            device if device is not None else get_default_device()
+        )
+        get_backend(self._device)
 
     def forward(self, x: np.ndarray, training: bool = True) -> np.ndarray:
         """Apply dropout during forward pass.
@@ -52,6 +53,7 @@ class Dropout(Layer):
             )
             return x * self._mask
 
+        self._mask = None
         return x
 
     def backward(self, grad: np.ndarray) -> np.ndarray:
@@ -65,7 +67,7 @@ class Dropout(Layer):
 
     def to(self, device: DeviceType) -> "Dropout":
         """Move layer to specified device."""
-        self._device = device
+        super().to(device)
         self._mask = None
         return self
 

@@ -20,6 +20,8 @@ class PredictCommand(BaseCommand):
 
     @staticmethod
     def add_arguments(parser):
+        parser.add_argument("--device", choices=["cpu", "cuda", "gpu"], default="cpu",
+                            help="Prediction device (default: cpu).")
         # Model and input
         parser.add_argument(
             "--model",
@@ -152,8 +154,8 @@ class PredictCommand(BaseCommand):
 
         # Try modern format first
         try:
-            from neura_command.serialization import load_model
-            model = load_model(model_path)
+            from neura_command.inference import InferenceModel
+            model = InferenceModel.from_file(model_path, device=getattr(self.args, "device", "cpu"))
             self._log_info(f"Loaded model from {model_path}")
             return model
         except FileNotFoundError:
@@ -165,6 +167,8 @@ class PredictCommand(BaseCommand):
         # Try legacy pickle format
         if model_path.endswith('.pkl') or Path(model_path + '.pkl').exists():
             try:
+                if getattr(self.args, "device", "cpu") != "cpu":
+                    raise ValueError("Legacy models support CPU only; export a modern model for CUDA")
                 from neura_command.deprecated.feed_forward_network.feed_forward_network_io import (
                     FeedForwardNetworkIO,
                 )
@@ -182,7 +186,7 @@ class PredictCommand(BaseCommand):
     def _load_input_data(self) -> Optional[np.ndarray]:
         """Load input data from CSV file."""
         try:
-            data = np.loadtxt(self.args.input_csv, delimiter=",")
+            data = np.loadtxt(self.args.input_csv, delimiter=",", dtype=np.float32, ndmin=2)
             
             # Ensure 2D: 1D array could be single sample with multiple features
             # or multiple samples with single feature. Default to multiple samples.
@@ -199,6 +203,8 @@ class PredictCommand(BaseCommand):
         """Make predictions using the model."""
         try:
             batch_size = self.args.batch_size
+            if batch_size is not None and batch_size < 1:
+                raise ValueError("batch_size must be positive")
 
             if batch_size is not None and len(input_data) > batch_size:
                 # Batch prediction for large datasets

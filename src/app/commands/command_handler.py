@@ -115,6 +115,8 @@ class CommandHandler:
                 # Merge subargs into args
                 for key, value in vars(subargs).items():
                     setattr(args, key, value)
+        elif remaining:
+            self.parser.error("unrecognized arguments: " + " ".join(remaining))
 
         return args
 

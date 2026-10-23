@@ -25,6 +25,7 @@ $py.class
 venv/
 env/
 /.venv
+/.venv-cuda
 
 # Dependency management
 pip-log.txt

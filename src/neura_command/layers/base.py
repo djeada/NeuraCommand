@@ -6,11 +6,11 @@ for forward/backward passes and parameter access.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional, Iterator, Literal
+from typing import List, Tuple, Iterator, Literal
 
 import numpy as np
 
-from neura_command.backend import get_backend, get_default_device
+from neura_command.backend import get_backend, normalize_device
 
 
 DeviceType = Literal["cpu", "cuda", "gpu"]
@@ -117,6 +117,8 @@ class Layer(ABC):
         Returns:
             self (for chaining)
         """
+        device = normalize_device(device)
+        get_backend(device)
         self._device = device
         return self
 

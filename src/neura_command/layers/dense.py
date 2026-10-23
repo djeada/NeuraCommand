@@ -2,12 +2,17 @@
 Dense (fully-connected) layer implementation.
 """
 
-from typing import List, Optional, Tuple, Literal
+from typing import List, Optional
 
 import numpy as np
 
 from neura_command.layers.base import Layer, ParameterMixin, DeviceType
-from neura_command.backend import get_backend, get_default_device, to_device
+from neura_command.backend import (
+    get_backend,
+    get_default_device,
+    to_device,
+    normalize_device,
+)
 
 
 class Dense(Layer, ParameterMixin):
@@ -46,7 +51,9 @@ class Dense(Layer, ParameterMixin):
         self.use_bias = use_bias
 
         # Use default device if not specified
-        self._device = device if device is not None else get_default_device()
+        self._device = normalize_device(
+            device if device is not None else get_default_device()
+        )
         xp = get_backend(self._device)
 
         # Initialize weights
@@ -83,16 +90,15 @@ class Dense(Layer, ParameterMixin):
         Returns:
             Output of shape (batch_size, out_features)
         """
-        xp = get_backend(self._device)
         self._training = training
-        self._input_cache = x
+        self._input_cache = x if training else None
 
         # Linear transformation
         z = x @ self.weights
         if self.use_bias:
             z = z + self.bias
 
-        self._pre_activation_cache = z
+        self._pre_activation_cache = z if training else None
 
         # Apply activation if present
         if self.activation is not None:
@@ -113,7 +119,7 @@ class Dense(Layer, ParameterMixin):
 
         # Gradient through activation
         if self.activation is not None:
-            grad = grad * self.activation.derivative(self._pre_activation_cache)
+            grad = self.activation.backward(self._pre_activation_cache, grad)
 
         # Gradient w.r.t. weights: input.T @ grad
         self._grad_weights = self._input_cache.T @ grad / batch_size
@@ -148,13 +154,15 @@ class Dense(Layer, ParameterMixin):
         Returns:
             self (for chaining)
         """
+        device = normalize_device(device)
+        get_backend(device)
         if device == self._device:
             return self
 
-        self._device = device
         self.weights = to_device(self.weights, device)
         if self.use_bias:
             self.bias = to_device(self.bias, device)
+        self._device = device
 
         # Clear caches
         self._input_cache = None

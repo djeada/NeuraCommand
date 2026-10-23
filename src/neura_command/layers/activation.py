@@ -5,12 +5,10 @@ These wrap activation functions as layers, allowing them to be used
 in Sequential models as separate components.
 """
 
-from typing import List, Literal
-
 import numpy as np
 
 from neura_command.layers.base import Layer, DeviceType
-from neura_command.backend import get_default_device
+from neura_command.backend import get_default_device, normalize_device, get_backend
 from neura_command.network_utils.activation_functions import (
     ActivationFunction,
     ReLUActivation,
@@ -69,20 +67,24 @@ class Activation(Layer):
             )
 
         self._input_cache = None
-        self._device = device if device is not None else get_default_device()
+        self._device = normalize_device(
+            device if device is not None else get_default_device()
+        )
+        get_backend(self._device)
 
     def forward(self, x: np.ndarray, training: bool = True) -> np.ndarray:
         """Apply activation function."""
-        self._input_cache = x
+        self._input_cache = x if training else None
         return self.activation.compute(x)
 
     def backward(self, grad: np.ndarray) -> np.ndarray:
         """Backward pass through activation."""
-        return grad * self.activation.derivative(self._input_cache)
+        return self.activation.backward(self._input_cache, grad)
 
     def to(self, device: DeviceType) -> "Activation":
         """Move layer to specified device (no-op for activations)."""
-        self._device = device
+        super().to(device)
+        self._input_cache = None
         return self
 
     def __repr__(self) -> str:
@@ -124,7 +126,10 @@ class LeakyReLU(Activation):
     def __init__(self, alpha: float = 0.01, device: DeviceType = None):
         self.activation = LeakyReLUActivation(alpha)
         self._input_cache = None
-        self._device = device if device is not None else get_default_device()
+        self._device = normalize_device(
+            device if device is not None else get_default_device()
+        )
+        get_backend(self._device)
 
 
 class ELU(Activation):
@@ -133,4 +138,7 @@ class ELU(Activation):
     def __init__(self, alpha: float = 1.0, device: DeviceType = None):
         self.activation = ELUActivation(alpha)
         self._input_cache = None
-        self._device = device if device is not None else get_default_device()
+        self._device = normalize_device(
+            device if device is not None else get_default_device()
+        )
+        get_backend(self._device)

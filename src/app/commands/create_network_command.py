@@ -30,13 +30,15 @@ class CreateNetworkCommand(BaseCommand):
     }
 
     # Supported optimizers
-    OPTIMIZER_CLASSES = ["SGD", "Adam", "RMSprop", "AdaGrad"]
+    OPTIMIZER_CLASSES = ["SGD", "Adam", "RMSprop", "AdaGrad", "Adadelta", "Nadam"]
 
     # Supported loss functions
     LOSS_CLASSES = ["MSELoss", "CrossEntropyLoss", "HuberLoss", "DifferenceLoss"]
 
     @staticmethod
     def add_arguments(parser):
+        parser.add_argument("--device", choices=["cpu", "cuda", "gpu"], default="cpu",
+                            help="Model creation device (default: cpu).")
         parser.add_argument(
             "--architecture",
             "--network-architecture-json",
@@ -216,6 +218,13 @@ class CreateNetworkCommand(BaseCommand):
             if "num_features" not in layer:
                 errors.append(f"Layer {index} (BatchNorm): missing 'num_features'")
 
+        elif layer_type.lower() == "flatten":
+            pass
+
+        elif layer_type.lower() == "input":
+            if "shape" not in layer:
+                errors.append(f"Layer {index} (Input): missing 'shape'")
+
         # Validate activation layers
         elif layer_type.lower() in self.ACTIVATION_MAP:
             pass  # Valid activation
@@ -275,7 +284,8 @@ class CreateNetworkCommand(BaseCommand):
             loss = self._create_loss(arch.get("loss", {"class": "MSELoss"}))
 
             # Create the Sequential model
-            model = Sequential(layers=layers, optimizer=optimizer, loss=loss)
+            model = Sequential(layers=layers, optimizer=optimizer, loss=loss,
+                               device=getattr(self.args, "device", "cpu"))
 
             # Save the model
             model.save(output_path)
@@ -300,7 +310,7 @@ class CreateNetworkCommand(BaseCommand):
     def _create_layer(self, config: Dict[str, Any]):
         """Create a layer from configuration."""
         from neura_command import (
-            Dense, Dropout, BatchNorm, Flatten,
+            Dense, Dropout, BatchNorm, Flatten, Input,
             ReLU, Sigmoid, Tanh, Softmax, LeakyReLU, ELU,
         )
 
@@ -331,6 +341,10 @@ class CreateNetworkCommand(BaseCommand):
 
         elif layer_type == "flatten":
             return Flatten()
+
+        elif layer_type == "input":
+            shape = config["shape"]
+            return Input(tuple(shape) if isinstance(shape, list) else shape)
 
         elif layer_type == "relu":
             return ReLU()
@@ -417,7 +431,7 @@ class CreateNetworkCommand(BaseCommand):
 
     def _create_optimizer(self, config: Dict[str, Any]):
         """Create optimizer from configuration."""
-        from neura_command import SGD, Adam, RMSprop, AdaGrad
+        from neura_command import SGD, Adam, RMSprop, AdaGrad, Adadelta, Nadam
 
         if isinstance(config, str):
             config = {"class": config}
@@ -430,20 +444,31 @@ class CreateNetworkCommand(BaseCommand):
                 learning_rate=lr,
                 momentum=config.get("momentum", 0.0),
                 nesterov=config.get("nesterov", False),
+                weight_decay=config.get("weight_decay", 0.0),
+                l1_regularization=config.get("l1_regularization", 0.0),
             )
-        elif opt_class == "Adam":
-            return Adam(
+        elif opt_class in ("Adam", "Nadam"):
+            optimizer_class = Adam if opt_class == "Adam" else Nadam
+            return optimizer_class(
                 learning_rate=lr,
                 beta1=config.get("beta1", 0.9),
                 beta2=config.get("beta2", 0.999),
+                epsilon=config.get("epsilon", 1e-8),
+                weight_decay=config.get("weight_decay", 0.0),
             )
         elif opt_class == "RMSprop":
             return RMSprop(
                 learning_rate=lr,
                 rho=config.get("rho", 0.9),
+                epsilon=config.get("epsilon", 1e-8),
+                weight_decay=config.get("weight_decay", 0.0),
             )
         elif opt_class == "AdaGrad":
-            return AdaGrad(learning_rate=lr)
+            return AdaGrad(learning_rate=lr, epsilon=config.get("epsilon", 1e-8))
+        elif opt_class == "Adadelta":
+            return Adadelta(learning_rate=config.get("learning_rate", 1.0),
+                            rho=config.get("rho", 0.95), epsilon=config.get("epsilon", 1e-6),
+                            weight_decay=config.get("weight_decay", 0.0))
         else:
             self._log_info(f"Unknown optimizer '{opt_class}', using Adam")
             return Adam(learning_rate=lr)
@@ -473,6 +498,8 @@ class CreateNetworkCommand(BaseCommand):
     def _create_legacy_model(self, arch: Dict[str, Any], output_path: str):
         """Create a model using the legacy API (pickle format)."""
         try:
+            if getattr(self.args, "device", "cpu") != "cpu":
+                raise ValueError("Legacy models support CPU only; use --format modern for CUDA")
             # Import legacy modules
             from neura_command.deprecated.feed_forward_network.feed_forward_network_io import (
                 FeedForwardNetworkIO,
