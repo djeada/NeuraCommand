@@ -6,7 +6,12 @@ from typing import List, Optional
 
 import numpy as np
 
-from neura_command.layers.base import Layer, ParameterMixin, DeviceType
+from neura_command.layers.base import (
+    Layer,
+    ParameterMixin,
+    DeviceType,
+    positive_integer,
+)
 from neura_command.backend import (
     get_backend,
     get_default_device,
@@ -50,7 +55,13 @@ class BatchNorm(Layer, ParameterMixin):
         momentum: float = 0.1,
         device: DeviceType = None,
     ):
-        self.num_features = num_features
+        self.num_features = num_features = positive_integer(
+            num_features, "num_features"
+        )
+        if not np.isfinite(epsilon) or epsilon <= 0:
+            raise ValueError("epsilon must be finite and positive")
+        if not np.isfinite(momentum) or not 0 <= momentum <= 1:
+            raise ValueError("momentum must be between 0 and 1")
         self.epsilon = epsilon
         self.momentum = momentum
 
@@ -88,6 +99,10 @@ class BatchNorm(Layer, ParameterMixin):
             Normalized output of shape (batch_size, num_features)
         """
         xp = get_backend(self._device)
+        if x.ndim != 2 or x.shape[1] != self.num_features:
+            raise ValueError(
+                f"BatchNorm expects shape (batch, {self.num_features}); got {x.shape}"
+            )
         self._training = training
 
         if training:
@@ -132,11 +147,13 @@ class BatchNorm(Layer, ParameterMixin):
             Gradient to pass to previous layer
         """
         xp = get_backend(self._device)
+        if self._input_normalized is None:
+            raise RuntimeError("BatchNorm.backward requires a training forward pass")
         batch_size = grad.shape[0]
 
         # Gradients w.r.t. gamma and beta
-        self._grad_gamma = xp.sum(grad * self._input_normalized, axis=0, keepdims=True)
-        self._grad_beta = xp.sum(grad, axis=0, keepdims=True)
+        self._grad_gamma = xp.mean(grad * self._input_normalized, axis=0, keepdims=True)
+        self._grad_beta = xp.mean(grad, axis=0, keepdims=True)
 
         # Gradient w.r.t. normalized input
         grad_normalized = grad * self.gamma
@@ -166,6 +183,9 @@ class BatchNorm(Layer, ParameterMixin):
     def gradients(self) -> List[np.ndarray]:
         """Return gradients for parameters."""
         return [self._grad_gamma, self._grad_beta]
+
+    def buffers(self) -> List[np.ndarray]:
+        return [self.running_mean, self.running_var]
 
     def to(self, device: DeviceType) -> "BatchNorm":
         """Move layer to specified device."""

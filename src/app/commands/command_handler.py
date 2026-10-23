@@ -56,6 +56,7 @@ class CommandHandler:
             description="NeuraCommand - Neural Network Command Line Tool",
             epilog="Use '%(prog)s <command> --help' for more information on a specific command.",
             formatter_class=argparse.RawDescriptionHelpFormatter,
+            allow_abbrev=False,
         )
         parser.add_argument(
             "--version",
@@ -81,6 +82,7 @@ class CommandHandler:
                 help=description,
                 description=description,
                 formatter_class=argparse.RawDescriptionHelpFormatter,
+                allow_abbrev=False,
             )
             command_class.add_arguments(subparser)
 
@@ -97,36 +99,43 @@ class CommandHandler:
 
     def _parse_arguments(self):
         """Parse command line arguments with support for both new and legacy syntax."""
-        # First, parse known args to check for legacy --action
-        args, remaining = self.parser.parse_known_args()
-
-        # Handle legacy --action syntax
-        if args.legacy_action and not getattr(args, 'command', None):
-            args.command = args.legacy_action
-            # Re-parse with the subcommand's arguments
-            command_class = self.command_map.get(args.command)
-            if command_class:
-                subparser = argparse.ArgumentParser(
-                    prog=f"neura_command --action {args.command}",
-                    description=self.COMMAND_DESCRIPTIONS.get(args.command, ""),
-                )
-                command_class.add_arguments(subparser)
-                subargs = subparser.parse_args(remaining)
-                # Merge subargs into args
-                for key, value in vars(subargs).items():
-                    setattr(args, key, value)
-        elif remaining:
-            self.parser.error("unrecognized arguments: " + " ".join(remaining))
-
+        argv = list(sys.argv[1:])
+        actions = []
+        remaining = []
+        index = 0
+        while index < len(argv):
+            token = argv[index]
+            if token == "--action":
+                if index + 1 >= len(argv) or argv[index + 1].startswith("-"):
+                    self.parser.error("--action requires a command")
+                actions.append(argv[index + 1])
+                index += 2
+                continue
+            if token.startswith("--action="):
+                actions.append(token.split("=", 1)[1])
+            else:
+                remaining.append(token)
+            index += 1
+        if actions:
+            if len(actions) != 1 or actions[0] not in self.command_map:
+                self.parser.error("specify exactly one valid --action command")
+            if remaining and remaining[0] in self.command_map:
+                self.parser.error("use a subcommand or --action, not both")
+            remaining.insert(0, actions[0])
+        args = self.parser.parse_args(remaining)
+        if actions:
+            args.legacy_action = actions[0]
         return args
 
     def execute_command(self):
         """Execute the parsed command."""
-        command = getattr(self.args, 'command', None)
+        command = getattr(self.args, "command", None)
         if not command:
             self.parser.print_help()
             print("\nError: Please specify a command.")
-            print("Use 'neura_command <command> --help' for more information on a command.")
+            print(
+                "Use 'neura_command <command> --help' for more information on a command."
+            )
             sys.exit(1)
 
         command_class = self.command_map.get(command)

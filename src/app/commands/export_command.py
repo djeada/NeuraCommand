@@ -1,6 +1,7 @@
 """Export lean inference artifacts or standalone embedded C99 networks."""
 
 import argparse
+import json
 import sys
 
 from app.commands.base_command import BaseCommand
@@ -34,7 +35,7 @@ class ExportCommand(BaseCommand):
         )
         parser.add_argument(
             "--prune-threshold",
-            type=float,
+            type=BaseCommand.nonnegative_float,
             default=0.0,
             help="Remove hidden channels with outgoing weights at/below this value; "
             "nonzero values are lossy and require accuracy validation (default: 0).",
@@ -46,13 +47,13 @@ class ExportCommand(BaseCommand):
         )
         parser.add_argument(
             "--max-weight-bytes",
-            type=int,
+            type=BaseCommand.nonnegative_int,
             default=None,
             help="Reject export if parameter storage exceeds this byte budget.",
         )
         parser.add_argument(
             "--max-scratch-bytes",
-            type=int,
+            type=BaseCommand.nonnegative_int,
             default=None,
             help="Reject C export if its scratch RAM exceeds this byte budget.",
         )
@@ -61,6 +62,22 @@ class ExportCommand(BaseCommand):
             default="neura_model",
             help="C symbol prefix (default: neura_model).",
         )
+
+        display = parser.add_mutually_exclusive_group()
+        display.add_argument(
+            "--json",
+            action="store_true",
+            help="Emit only a machine-readable export report on stdout.",
+        )
+        display.add_argument(
+            "--quiet", "-q", action="store_true", help="Suppress success output."
+        )
+
+    def _say(self, message):
+        if not getattr(self.args, "json", False) and not getattr(
+            self.args, "quiet", False
+        ):
+            print(message)
 
     def execute(self):
         from neura_command.serialization import load_model
@@ -78,9 +95,9 @@ class ExportCommand(BaseCommand):
                 raise ValueError(
                     "--max-scratch-bytes requires --format c; NumPy temporary RAM is not statically bounded"
                 )
-            print(f"Loading model from '{self.args.model}'...")
+            self._say(f"Loading model from '{self.args.model}'...")
             model = load_model(self.args.model)
-            print(f"Original model: {model.num_parameters:,} parameters")
+            self._say(f"Original model: {model.num_parameters:,} parameters")
             quantize = self.args.quantize if self.args.quantize != "none" else None
             inference = InferenceModel.from_sequential(
                 model,
@@ -96,13 +113,13 @@ class ExportCommand(BaseCommand):
                     max_weight_bytes=max_weights,
                     max_scratch_bytes=max_scratch,
                 )
-                print(
+                self._say(
                     f"Exported C99: {report['source_path']} and {report['header_path']}"
                 )
-                print(
+                self._say(
                     f"Weights: {report['weight_bytes']} bytes; scratch RAM: {report['scratch_bytes']} bytes"
                 )
-                print(f"Resource report: {report['report_path']}")
+                self._say(f"Resource report: {report['report_path']}")
             else:
                 if max_weights is not None and inference.memory_bytes > max_weights:
                     raise ValueError(
@@ -110,11 +127,33 @@ class ExportCommand(BaseCommand):
                     )
                 inference.save(self.args.output)
                 json_path, npz_path = InferenceModel.artifact_paths(self.args.output)
-                print(f"Exported inference artifact to '{json_path}' and '{npz_path}'")
-                print(f"Inference parameter storage: {inference.memory_bytes} bytes")
-            print(
+                self._say(
+                    f"Exported inference artifact to '{json_path}' and '{npz_path}'"
+                )
+                self._say(
+                    f"Inference parameter storage: {inference.memory_bytes} bytes"
+                )
+                report = {
+                    "json_path": str(json_path),
+                    "weights_path": str(npz_path),
+                    "weight_bytes": inference.memory_bytes,
+                    "scratch_bytes": None,
+                }
+
+            self._say(
                 f"Exported layers: {len(inference.layers)}; quantization: {quantize or 'float32'}"
             )
+            report.update(
+                {
+                    "format": output_format,
+                    "source_parameters": model.num_parameters,
+                    "exported_parameters": inference.num_parameters,
+                    "quantization": quantize or "float32",
+                    "num_layers": len(inference.layers),
+                }
+            )
+            if getattr(self.args, "json", False):
+                print(json.dumps(report, indent=2, allow_nan=False))
         except Exception as error:
             print(f"Error exporting model: {error}", file=sys.stderr)
             raise SystemExit(1) from error

@@ -6,7 +6,12 @@ from typing import List, Optional
 
 import numpy as np
 
-from neura_command.layers.base import Layer, ParameterMixin, DeviceType
+from neura_command.layers.base import (
+    Layer,
+    ParameterMixin,
+    DeviceType,
+    positive_integer,
+)
 from neura_command.backend import (
     get_backend,
     get_default_device,
@@ -45,8 +50,10 @@ class Dense(Layer, ParameterMixin):
         weight_init: str = "he",
         device: DeviceType = None,
     ):
-        self.in_features = in_features
-        self.out_features = out_features
+        self.in_features = in_features = positive_integer(in_features, "in_features")
+        self.out_features = out_features = positive_integer(
+            out_features, "out_features"
+        )
         self.activation = activation
         self.use_bias = use_bias
 
@@ -90,6 +97,10 @@ class Dense(Layer, ParameterMixin):
         Returns:
             Output of shape (batch_size, out_features)
         """
+        if x.ndim != 2 or x.shape[1] != self.in_features:
+            raise ValueError(
+                f"Dense expects shape (batch, {self.in_features}); got {x.shape}. Use Flatten for higher-rank inputs."
+            )
         self._training = training
         self._input_cache = x if training else None
 
@@ -115,6 +126,8 @@ class Dense(Layer, ParameterMixin):
             Gradient to pass to previous layer, shape (batch_size, in_features)
         """
         xp = get_backend(self._device)
+        if self._input_cache is None:
+            raise RuntimeError("Dense.backward requires a training forward pass")
         batch_size = grad.shape[0]
 
         # Gradient through activation

@@ -87,6 +87,7 @@ from neura_command.backend import (
     is_cupy_available,
     to_device,
     to_numpy,
+    set_random_seed,
 )
 
 __all__ = [
@@ -141,4 +142,5 @@ __all__ = [
     "is_cupy_available",
     "to_device",
     "to_numpy",
+    "set_random_seed",
 ]

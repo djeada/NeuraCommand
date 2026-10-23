@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any, Tuple
 
 import numpy as np
 
-from neura_command.layers.base import Layer, DeviceType
+from neura_command.layers.base import Layer, DeviceType, positive_integer
 from neura_command.network_utils.optimizers import Optimizer, Adam
 from neura_command.network_utils.loss_functions import LossFunction, MSELoss
 from neura_command.network_utils.callbacks import Callback, HistoryCallback
@@ -19,6 +19,7 @@ from neura_command.backend import (
     to_numpy,
     normalize_device,
     get_array_module,
+    set_random_seed,
 )
 
 import logging
@@ -86,6 +87,10 @@ class Sequential:
         """Get the device this model is on."""
         return self._device
 
+    @property
+    def training(self) -> bool:
+        return self._training
+
     def to(self, device: DeviceType) -> "Sequential":
         """Move model to specified device.
 
@@ -124,16 +129,18 @@ class Sequential:
         self.layers.append(layer)
         return self
 
-    def forward(self, x: np.ndarray, training: bool = True) -> np.ndarray:
+    def forward(self, x: np.ndarray, training: Optional[bool] = None) -> np.ndarray:
         """Forward pass through all layers.
 
         Args:
             x: Input data of shape (batch_size, input_features)
-            training: Whether in training mode
+            training: Override training mode; None follows train_mode()/eval_mode()
 
         Returns:
             Output of shape (batch_size, output_features)
         """
+        if training is None:
+            training = self._training
         # Move input to device if needed
         x = to_device(x, self._device)
         x = x.astype(get_backend(self._device).float32, copy=False)
@@ -177,7 +184,12 @@ class Sequential:
 
     def compute_loss(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         """Compute loss value."""
-        return self.loss.compute(y_true, y_pred)
+        value = self.loss.compute(y_true, y_pred)
+        if getattr(value, "ndim", 0) != 0:
+            raise ValueError(
+                "Loss.compute() must return a scalar for training/evaluation"
+            )
+        return value
 
     def compute_loss_gradient(
         self, y_true: np.ndarray, y_pred: np.ndarray
@@ -205,18 +217,19 @@ class Sequential:
         n_samples = len(X)
         total_loss = 0.0
 
-        for i in range(0, n_samples, batch_size):
-            X_batch = X[i : i + batch_size]
-            y_batch = y[i : i + batch_size]
-            y_pred = self.forward(X_batch, training=False)
-            batch_loss = self.compute_loss(
-                to_device(y_batch, self._device).astype(y_pred.dtype, copy=False),
-                y_pred,
-            )
-            total_loss += batch_loss * len(X_batch)
-
-        if was_training:
-            self.train_mode()
+        try:
+            for i in range(0, n_samples, batch_size):
+                X_batch = X[i : i + batch_size]
+                y_batch = y[i : i + batch_size]
+                y_pred = self.forward(X_batch, training=False)
+                batch_loss = self.compute_loss(
+                    to_device(y_batch, self._device).astype(y_pred.dtype, copy=False),
+                    y_pred,
+                )
+                total_loss += batch_loss * len(X_batch)
+        finally:
+            if was_training:
+                self.train_mode()
 
         return self._loss_to_float(total_loss / n_samples)
 
@@ -230,6 +243,7 @@ class Sequential:
         callbacks: Optional[List[Callback]] = None,
         shuffle: bool = True,
         verbose: bool = True,
+        seed: Optional[int] = None,
     ) -> Dict[str, List[float]]:
         """Train the model.
 
@@ -242,24 +256,33 @@ class Sequential:
             callbacks: List of Callback objects
             shuffle: Whether to shuffle data each epoch
             verbose: Whether to print progress
+            seed: Optional seed for shuffling and dropout; seed initialization separately
 
         Returns:
             Dictionary containing training history
         """
-        self._validate_data(X, y, batch_size)
-        if epochs < 1:
-            raise ValueError("epochs must be positive")
+        X, y = self._prepare_data(X, y, batch_size)
+        epochs = positive_integer(epochs, "epochs")
         if validation_data is not None:
-            self._validate_data(*validation_data, batch_size)
+            validation_data = self._prepare_data(*validation_data, batch_size)
+        if seed is not None:
+            set_random_seed(seed, self._device)
         self.train_mode()
 
         # Setup callbacks
         callbacks = list(callbacks or [])
+        batch_callbacks = [
+            cb
+            for cb in callbacks
+            if type(cb).on_batch_begin is not Callback.on_batch_begin
+            or type(cb).on_batch_end is not Callback.on_batch_end
+        ]
         history = HistoryCallback()
         callbacks.append(history)
 
         # Notify callbacks of training start
         for cb in callbacks:
+            cb.set_model(self)
             cb.on_train_begin()
 
         n_samples = len(X)
@@ -268,7 +291,9 @@ class Sequential:
         for epoch in range(epochs):
             # Notify callbacks
             for cb in callbacks:
-                cb.on_epoch_begin(epoch)
+                cb.on_epoch_begin(
+                    epoch, {"learning_rate": self.optimizer.learning_rate}
+                )
 
             # Shuffle data
             if shuffle:
@@ -281,6 +306,9 @@ class Sequential:
             for batch_idx in range(n_batches):
                 start = batch_idx * batch_size
                 end = min(start + batch_size, n_samples)
+
+                for cb in batch_callbacks:
+                    cb.on_batch_begin(batch_idx, {"size": end - start, "epoch": epoch})
 
                 selection = slice(start, end) if indices is None else indices[start:end]
                 # Only gather a batch; avoid a second full dataset each epoch.
@@ -314,10 +342,23 @@ class Sequential:
                 # Update weights
                 self.optimizer.step(self.layers)
 
+                if batch_callbacks:
+                    batch_logs = {
+                        "loss": self._loss_to_float(batch_loss),
+                        "size": end - start,
+                        "epoch": epoch,
+                    }
+                    for cb in batch_callbacks:
+                        cb.on_batch_end(batch_idx, batch_logs)
+
             epoch_loss = self._loss_to_float(epoch_loss / n_samples)
 
             # Compute validation loss
-            logs = {"loss": epoch_loss, "epoch": epoch}
+            logs = {
+                "loss": epoch_loss,
+                "epoch": epoch,
+                "learning_rate": self.optimizer.learning_rate,
+            }
 
             if validation_data is not None:
                 X_val, y_val = validation_data
@@ -363,18 +404,81 @@ class Sequential:
         Returns:
             Dictionary with 'loss' and optionally other metrics
         """
-        self._validate_data(X, y, batch_size)
-        self.eval_mode()
+        X, y = self._prepare_data(X, y, batch_size)
         return {"loss": self._average_loss(X, y, batch_size=batch_size)}
 
     @staticmethod
-    def _validate_data(X, y, batch_size):
-        if batch_size < 1:
-            raise ValueError("batch_size must be positive")
-        if len(X) == 0 or len(X) != len(y):
+    def _prepare_data(X, y, batch_size):
+        positive_integer(batch_size, "batch_size")
+        arrays = []
+        for name, value in (("Features", X), ("Targets", y)):
+            xp = get_array_module(value)
+            try:
+                array = xp.asarray(value)
+                if array.dtype.kind not in "biuf":
+                    raise ValueError("expected real numeric values")
+                if array.ndim == 1:
+                    array = array.reshape(-1, 1)
+                if array.ndim < 2 or any(size == 0 for size in array.shape):
+                    raise ValueError("expected non-empty batched data")
+                if not bool(to_numpy(xp.all(xp.isfinite(array)))):
+                    raise ValueError("values must be finite")
+                if bool(to_numpy(xp.any(xp.abs(array) > np.finfo(np.float32).max))):
+                    raise ValueError("values must be representable as float32")
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"{name}: {error}") from error
+            arrays.append(array)
+        X, y = arrays
+        if len(X) != len(y):
             raise ValueError(
                 "Features and targets must have matching, non-empty batches"
             )
+        return X, y
+
+    def _weight_arrays(self):
+        return [
+            array
+            for layer in self.layers
+            for array in (*layer.parameters(), *layer.buffers())
+        ]
+
+    def get_weights(self):
+        """Copy parameters and inference buffers on the model's current device."""
+        return [array.copy() for array in self._weight_arrays()]
+
+    def set_weights(self, weights, *, reset_optimizer=True):
+        """Restore parameters and buffers, validating every shape before mutation.
+
+        Optimizer moments are reset by default because they belong to the old
+        parameters. This is a weights snapshot, not an optimizer checkpoint.
+        """
+        arrays = self._weight_arrays()
+        if len(weights) != len(arrays):
+            raise ValueError(
+                f"Expected {len(arrays)} weight/buffer arrays; got {len(weights)}"
+            )
+        converted = []
+        xp = get_backend(self._device)
+        for target, value in zip(arrays, weights):
+            candidate = to_device(value, self._device)
+            if candidate.shape != target.shape:
+                raise ValueError(
+                    f"Weight shape mismatch: expected {target.shape}; got {candidate.shape}"
+                )
+            if candidate.dtype.kind not in "biuf" or not bool(
+                to_numpy(xp.all(xp.isfinite(candidate)))
+            ):
+                raise ValueError("Weights must be finite")
+            if target.dtype.kind == "f" and bool(
+                to_numpy(xp.any(xp.abs(candidate) > np.finfo(target.dtype).max))
+            ):
+                raise ValueError("Weights are not representable in the model dtype")
+            candidate = candidate.astype(target.dtype, copy=False)
+            converted.append(candidate.copy())
+        for target, value in zip(arrays, converted):
+            target[...] = value
+        if reset_optimizer:
+            self.optimizer.reset()
 
     def summary(self) -> str:
         """Return a summary of the model architecture.

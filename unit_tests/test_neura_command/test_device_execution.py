@@ -283,3 +283,30 @@ def test_optimizer_configuration_and_predictions_survive_save_load(tmp_path, fac
         if isinstance(value, (float, int)):
             assert getattr(loaded.optimizer, name) == value
     np.testing.assert_array_equal(loaded.predict(x), model.predict(x))
+
+
+def test_cuda_callbacks_restore_buffers_and_record_scheduled_rates(cuda):
+    from neura_command import EarlyStopping, LearningRateScheduler
+
+    model = Sequential(
+        [Dense(2, 4), BatchNorm(4), ReLU(), Dropout(0.2), Dense(4, 1)], device="cuda"
+    )
+    stopping = EarlyStopping(monitor="loss", patience=1, min_delta=100)
+    scheduler = LearningRateScheduler(lambda epoch, rate: rate * 0.8)
+    x, y = cuda.ones((8, 2), cuda.float32), cuda.ones((8, 1), cuda.float32)
+    history = model.train(
+        x,
+        y,
+        epochs=4,
+        batch_size=4,
+        callbacks=[scheduler, stopping],
+        seed=19,
+        verbose=False,
+    )
+    assert len(history["loss"]) == 2
+    np.testing.assert_allclose(history["learning_rate"], [0.0008, 0.00064])
+    assert all(isinstance(value, cuda.ndarray) for value in stopping.best_weights)
+    for actual, expected in zip(model.get_weights(), stopping.best_weights):
+        np.testing.assert_array_equal(cuda.asnumpy(actual), cuda.asnumpy(expected))
+    assert model.optimizer._t == 0
+    assert np.isfinite(model.predict(x)).all()

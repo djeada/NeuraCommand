@@ -16,12 +16,19 @@ python examples/embedded_demo.py --device cpu
 python examples/embedded_demo.py --device cuda --output-dir build/cuda-demo
 ```
 
-The example trains a 6 → 12 → 3 classifier on synthetic data, holds out 96 samples,
-and writes a portable training model, an INT8 inference artifact, C source/header,
-and a resource report. It requests a 1,024-byte parameter budget and 256-byte
-scratch budget. Its synthetic accuracy is a workflow check, not an application
+The example trains a 6 → 12 → 3 classifier on synthetic data with separate
+training, validation, and test splits. It holds out 96 test samples and writes
+CSV inputs/targets, training history, metrics, a portable training model, an INT8
+inference artifact, C source/header, and a resource report. It requests a 1,024-byte
+parameter budget and 256-byte scratch budget. Its synthetic accuracy is a workflow check, not an application
 benchmark. Use application-specific validation data and target measurements for
 shipping decisions.
+
+Pass `--verify-c` to compile and execute the generated function on all held-out
+test inputs and record its maximum absolute difference from Python INT8 inference.
+`--seed`, `--epochs`, `--hidden`, `--samples`, and `--batch-size` control the run.
+The [demo guide](../examples/README.md) also covers a two-output regression demo
+and a complete CLI workflow demo.
 
 ## Export for firmware
 

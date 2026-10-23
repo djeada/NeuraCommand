@@ -12,6 +12,7 @@ Design goals:
 """
 
 import threading
+from numbers import Integral
 from typing import Literal, Any
 from dataclasses import dataclass
 
@@ -68,6 +69,20 @@ def get_default_device() -> DeviceType:
         Current default device ('cpu' or 'cuda')
     """
     return getattr(_thread_local, "device", _global_default_device)
+
+
+def set_random_seed(seed: int, device: DeviceType = None) -> None:
+    """Seed NumPy and, when selected, CuPy for initialization, shuffle, and dropout."""
+    if (
+        isinstance(seed, bool)
+        or not isinstance(seed, Integral)
+        or not 0 <= seed < 2**32
+    ):
+        raise ValueError("seed must be an integer between 0 and 2**32 - 1")
+    xp = get_backend(device)
+    np.random.seed(int(seed))
+    if xp is not np:
+        xp.random.seed(int(seed))
 
 
 def set_default_device(device: DeviceType) -> None:

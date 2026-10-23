@@ -31,6 +31,7 @@ from neura_command.backend.array_backend import (
     Backend,
     normalize_device,
     DeviceContext,
+    set_random_seed,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "Backend",
     "normalize_device",
     "DeviceContext",
+    "set_random_seed",
 ]

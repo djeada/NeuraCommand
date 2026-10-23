@@ -6,6 +6,7 @@ for forward/backward passes and parameter access.
 """
 
 from abc import ABC, abstractmethod
+from numbers import Integral
 from typing import List, Tuple, Iterator, Literal
 
 import numpy as np
@@ -14,6 +15,12 @@ from neura_command.backend import get_backend, normalize_device
 
 
 DeviceType = Literal["cpu", "cuda", "gpu"]
+
+
+def positive_integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, Integral) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(value)
 
 
 class Layer(ABC):
@@ -88,6 +95,10 @@ class Layer(ABC):
         Returns:
             List of gradient arrays
         """
+        return []
+
+    def buffers(self) -> List[np.ndarray]:
+        """Non-trainable arrays needed to reproduce inference (for example BN stats)."""
         return []
 
     def parameters_and_gradients(self) -> Iterator[Tuple[np.ndarray, np.ndarray]]:

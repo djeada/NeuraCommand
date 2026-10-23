@@ -26,6 +26,18 @@ if TYPE_CHECKING:
 _LAYER_REGISTRY: Dict[str, type] = {}
 
 
+def model_paths(path, *, read=False):
+    """JSON/NPZ paths preserving dotted base names, with old-path read fallback."""
+    path = Path(path)
+    base = path.with_suffix("") if path.suffix in {".json", ".npz"} else path
+    paths = Path(f"{base}.json"), Path(f"{base}.npz")
+    if read and not paths[0].exists() and path.suffix not in {".json", ".npz"}:
+        old = path.with_suffix(".json"), path.with_suffix(".npz")
+        if old[0].exists():
+            return old
+    return paths
+
+
 def register_layer(cls: type) -> type:
     """Register a layer class for serialization."""
     _LAYER_REGISTRY[cls.__name__] = cls
@@ -377,7 +389,7 @@ def save_model(
         config["metadata"] = metadata
 
     # Save configuration as JSON
-    json_path = path.with_suffix(".json")
+    json_path, npz_path = model_paths(path)
     with open(json_path, "w") as f:
         json.dump(config, f, indent=2)
 
@@ -396,7 +408,6 @@ def save_model(
             weights_dict[f"layer_{i}_running_var"] = to_numpy(layer.running_var)
 
     # Save weights as NPZ
-    npz_path = path.with_suffix(".npz")
     np.savez(npz_path, **weights_dict)
 
 
@@ -424,8 +435,7 @@ def load_model(
     get_backend(device)
 
     path = Path(path)
-    json_path = path.with_suffix(".json")
-    npz_path = path.with_suffix(".npz")
+    json_path, npz_path = model_paths(path, read=True)
 
     if not json_path.exists():
         raise FileNotFoundError(f"Model config not found: {json_path}")
@@ -494,8 +504,7 @@ def get_model_info(path: Union[str, Path]) -> Dict[str, Any]:
         Dictionary with model information
     """
     path = Path(path)
-    json_path = path.with_suffix(".json")
-    npz_path = path.with_suffix(".npz")
+    json_path, npz_path = model_paths(path, read=True)
 
     with open(json_path, "r") as f:
         config = json.load(f)
@@ -503,12 +512,21 @@ def get_model_info(path: Union[str, Path]) -> Dict[str, Any]:
     # Get weights file size
     weights_size = npz_path.stat().st_size if npz_path.exists() else 0
 
+    artifact_type = config.get("artifact_type", "training_model")
+    layers = (
+        config["layers"]
+        if artifact_type == "inference_model"
+        else config["model"]["layers"]
+    )
     return {
+        "artifact_type": artifact_type,
         "neura_command_version": config.get("neura_command_version"),
         "format_version": config.get("format_version"),
         "saved_at": config.get("saved_at"),
-        "num_layers": len(config["model"]["layers"]),
-        "layers": [layer["class"] for layer in config["model"]["layers"]],
+        "num_layers": len(layers),
+        "layers": [layer["class"] for layer in layers],
+        "config_path": str(json_path),
+        "weights_path": str(npz_path),
         "optimizer": config.get("optimizer", {}).get("class"),
         "loss": config.get("loss", {}).get("class"),
         "weights_size_bytes": weights_size,

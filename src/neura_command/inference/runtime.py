@@ -233,6 +233,18 @@ class InferenceModel:
         return json_path, npz_path
 
     @property
+    def num_parameters(self):
+        """Deployed Dense/BatchNorm parameter count after graph compaction."""
+        total = 0
+        for layer in self.layers:
+            actual = layer.layer if isinstance(layer, _InferenceLayerWrapper) else layer
+            for name in ("weights", "bias", "gamma", "beta"):
+                value = getattr(actual, name, None)
+                if value is not None:
+                    total += value.size
+        return total
+
+    @property
     def memory_bytes(self) -> int:
         """Parameter storage including quantization scales (excludes Python overhead)."""
         total = 0

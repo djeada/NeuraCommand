@@ -348,5 +348,5 @@ class TestEmbeddedCLI:
                     "--quiet",
                 ]
             )
-        assert error.value.code == 1
+        assert error.value.code == 2
         assert not (tmp_path / "failed.npz").exists()

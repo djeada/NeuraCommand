@@ -173,6 +173,48 @@ gpu_inference = InferenceModel.load("deployment", device="cuda")
 
 Inference snapshots own their parameters and contain no training caches or gradients. Python inference defaults to CPU regardless of the source model's device. INT8 is weight-only quantization with float32 computation, and Python float16 exports also accumulate in float32. The Python API keeps `optimize=False` by default for compatibility; enable it explicitly for compact deployment.
 
+### Reproducible training and callbacks
+
+Use `create --seed 42` to reproduce initial weights, and `train --seed 42` to reproduce validation splitting, shuffling, and dropout on the selected backend. `train --no-shuffle` preserves input order and reserves the last samples for validation. A batch may be larger than the dataset; the final partial batch is supported. Validation fractions must be in `[0, 1)` and always produce non-empty training/validation sets when requested on at least two samples.
+
+```shell
+neura_command create --architecture architecture.json --output initial --seed 42
+neura_command train --model initial --features-csv features.csv --targets-csv targets.csv \
+  --output trained --seed 42 --validation-split 0.2 --early-stopping 10 \
+  --save-history results/history.json
+```
+
+`EarlyStopping` now restores the best parameters and BatchNorm running statistics. Restoring a weights snapshot resets optimizer moments; it does not restore a full optimizer checkpoint. `LearningRateScheduler` updates the bound model's optimizer, batch callbacks receive sample counts and losses, and history records the actual learning rate.
+
+```python
+from neura_command import EarlyStopping, LearningRateScheduler, set_random_seed
+
+set_random_seed(42, device="cpu")  # Before constructing layers
+history = model.train(
+    X, y, seed=42, validation_data=(X_val, y_val),
+    callbacks=[EarlyStopping(patience=10),
+               LearningRateScheduler(lambda epoch, rate: rate * 0.98)],
+)
+snapshot = model.get_weights()    # Includes non-trainable inference buffers
+model.set_weights(snapshot)       # Validates every shape before changing values
+```
+
+Features and targets must be finite real data. One-dimensional training arrays become single-feature/target columns; other target shapes must match predictions exactly. Multi-output MSE/Huber and BatchNorm parameter gradients follow the same batch-mean convention. `eval_mode()` controls `forward()` unless `training=` is explicitly supplied; evaluation preserves the model's previous mode.
+
+For scripting, `info --format json` accepts both training models and inference artifacts, and `export --json` writes a standalone JSON resource report to stdout. `export --quiet` suppresses success messages. Invalid numeric options and unknown/abbreviated flags fail during parsing. Training models preserve dotted base names such as `model.v2.json`/`model.v2.npz`, while old paths remain readable.
+
+### Runnable demos
+
+All demos generate synthetic data locally, save their inputs/history/metrics, support CPU/CUDA, and can compile and execute generated C for comparison. They use separate training, validation, and test data.
+
+```shell
+python examples/embedded_demo.py --seed 42 --verify-c
+python examples/regression_demo.py --seed 42 --verify-c
+python examples/cli_demo.py --seed 42 --verify-c
+```
+
+Use `--epochs`, `--samples`, `--hidden`, `--batch-size`, `--output-dir`, and memory-budget flags to adjust a run. `--verify-c` requires a native C99 compiler. See the [demo guide](examples/README.md) for outputs and examples.
+
 ### Analyze
 
 Use the `analyze` action to perform detailed network analytics and diagnostics. This includes architecture analysis, weight statistics, performance metrics, and error analysis.
